@@ -15,7 +15,8 @@ ENV API_INTERNAL_URL=$API_INTERNAL_URL NEXT_TELEMETRY_DISABLED=1
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
-RUN pnpm install --frozen-lockfile
+COPY apps/apply-runner/package.json apps/apply-runner/
+RUN pnpm install --frozen-lockfile --filter api... --filter web...
 COPY apps/api apps/api
 COPY apps/web apps/web
 RUN pnpm --filter api build \

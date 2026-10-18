@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AccountController } from './account/account';
+import { AutoApplyController } from './autoapply/autoapply.controller';
+import { AutoApplyService } from './autoapply/autoapply.service';
 import { AgentPackages } from './agents/packages';
 import { ApplicationsController } from './applications/applications';
 import { AuthController, AuthService } from './auth/auth';
@@ -30,7 +32,7 @@ import { WorkspaceAccess, WorkspacesController } from './workspaces/workspaces';
 /** Services shared by the API and the worker. */
 export const CORE_PROVIDERS = [
   PrismaService, AuditService, LlmService, QueueService, TasksService, TaskDefinitions, TaskRunner, AgentPackages,
-  CoursesService, KnowledgeService, SchedulerService, TickService, WorkspaceAccess,
+  CoursesService, KnowledgeService, SchedulerService, TickService, WorkspaceAccess, AutoApplyService,
 ];
 
 @Module({ providers: CORE_PROVIDERS, exports: CORE_PROVIDERS })
@@ -40,7 +42,7 @@ export class CoreModule {}
   imports: [CoreModule, ThrottlerModule.forRoot([{ ttl: 60_000, limit: Number(process.env.THROTTLE_LIMIT || 600) }])],
   controllers: [
     AuthController, WorkspacesController, SharesController, ProfileController, ApplicationsController, RoundsController,
-    QuestionsController, CoursesController, PracticeController, LlmController, TasksController, DashboardController, AccountController,
+    QuestionsController, CoursesController, PracticeController, LlmController, TasksController, DashboardController, AccountController, AutoApplyController,
   ],
   providers: [
     AuthService,

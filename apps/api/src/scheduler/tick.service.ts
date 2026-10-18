@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { AutoApplyService } from '../autoapply/autoapply.service';
 import { PrismaService } from '../prisma.service';
 import { QueueService } from '../tasks/queue.service';
 import { TaskRunner } from '../tasks/runner';
@@ -14,11 +15,11 @@ export class TickService {
   private log = new Logger('Tick');
   constructor(
     private prisma: PrismaService, private tasks: TasksService, private runner: TaskRunner,
-    private queue: QueueService, private scheduler: SchedulerService,
+    private queue: QueueService, private scheduler: SchedulerService, private autoApply: AutoApplyService,
   ) {}
 
   async tick(workerId: string, now = new Date()) {
-    const stats = { activated: 0, retried: 0, recovered: 0, requeued: 0, reminders: 0 };
+    const stats = { activated: 0, retried: 0, recovered: 0, requeued: 0, reminders: 0, applyRecovered: 0, sourcesScanned: 0 };
 
     // 1. Scheduled tasks that are due → route them (LLM / agent) now, based on current availability.
     for (const t of await this.prisma.agentTask.findMany({ where: { state: 'scheduled', scheduledFor: { lte: now } }, orderBy: [{ priority: 'asc' }, { scheduledFor: 'asc' }], take: 50 })) {
@@ -62,6 +63,10 @@ export class TickService {
     }
 
     stats.reminders = await this.scheduler.fireReminders(now);
+
+    // 5. Auto Apply: crashed apply runners (never auto-retried after Submit), then due job-source scans.
+    stats.applyRecovered = await this.autoApply.recoverStale(now);
+    stats.sourcesScanned = await this.autoApply.discoverDue(now).catch((e) => { this.log.warn(`discovery: ${e.message}`); return 0; });
     if (Object.values(stats).some(Boolean)) this.log.log(JSON.stringify(stats));
     return stats;
   }

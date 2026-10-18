@@ -7,6 +7,7 @@ import type { LessonDraft, LessonQuestion } from '../courses/planner';
 import { KnowledgeService } from '../knowledge/questions';
 import { normalizeQuestion } from '../knowledge/srs';
 import { applyEvaluationToSrs } from '../practice/practice';
+import { AutoApplyService, verifyEvidence } from '../autoapply/autoapply.service';
 import { PrismaService } from '../prisma.service';
 import { OUTPUT_SCHEMAS, TaskType } from './schemas';
 
@@ -43,7 +44,7 @@ const asLessonDraft = (l: z.infer<typeof OUTPUT_SCHEMAS.lesson_regeneration>['le
 
 @Injectable()
 export class TaskDefinitions {
-  constructor(private prisma: PrismaService, private courses: CoursesService, private kb: KnowledgeService) {}
+  constructor(private prisma: PrismaService, private courses: CoursesService, private kb: KnowledgeService, private autoApply: AutoApplyService) {}
 
   get<T extends TaskType>(type: T): Def<T> & { schema: (typeof OUTPUT_SCHEMAS)[T] } {
     const d = (this.defs as Record<string, Def<TaskType>>)[type];
@@ -302,5 +303,92 @@ export class TaskDefinitions {
         return { outputRef: { applicationId, sources: out.sources.length, questions: added }, review: true };
       },
     },
+
+    job_match: {
+      instruction: 'Assess how well the candidate fits this job using ONLY the job text and the candidate facts. Score 0-100, list strengths, gaps and required qualifications the facts do not show. Do not assume skills that are not listed.',
+      context: async (task) => {
+        const lead = await this.leadFor(task);
+        const profile = await this.prisma.candidateProfile.findUnique({ where: { workspaceId: task.workspaceId } });
+        const resume = lead.resumeId ? await this.prisma.resumeDocument.findUnique({ where: { id: lead.resumeId } }) : null;
+        return {
+          job: { title: lead.title, company: lead.company, location: lead.location, description: lead.description.slice(0, 12000) },
+          candidate: { headline: profile?.headline, yearsExperience: profile?.yearsExperience, coreTech: profile?.coreTech, targetRoles: profile?.targetRoles, confirmedFacts: profile?.confirmedFacts },
+          cvExcerpt: resume?.extractedText?.slice(0, 6000), deterministicScore: lead.fitScore, blockers: lead.blockers,
+        };
+      },
+      apply: async (task, out, source, model) => {
+        const lead = await this.leadFor(task);
+        await this.prisma.jobLead.update({ where: { id: lead.id }, data: { aiFit: { ...out, source, model, at: new Date().toISOString() } as Prisma.InputJsonValue } });
+        return { outputRef: { leadId: lead.id, score: out.score }, review: false };
+      },
+    },
+
+    apply_answers: {
+      instruction: 'Draft answers for the listed open-ended application questions (motivation, "tell us about…") and a short cover note. Use ONLY facts from the candidate context: never invent employers, projects, numbers, salary, visa or legal details. Keep each answer under 150 words. Only answer the keys listed in "openEndedKeys".',
+      context: async (task) => {
+        const lead = await this.leadFor(task);
+        const { keys } = task.inputSnapshot as { keys: string[] };
+        const kit = lead.applyKit as { answers?: { key: string; label: string }[] } | null;
+        const profile = await this.prisma.candidateProfile.findUnique({ where: { workspaceId: task.workspaceId } });
+        return {
+          job: { title: lead.title, company: lead.company, description: lead.description.slice(0, 8000) },
+          openEndedKeys: keys, questions: (kit?.answers ?? []).filter((a) => keys.includes(a.key)).map((a) => ({ key: a.key, label: a.label })),
+          candidate: { headline: profile?.headline, summary: profile?.summary, yearsExperience: profile?.yearsExperience, coreTech: profile?.coreTech, confirmedFacts: profile?.confirmedFacts },
+        };
+      },
+      apply: async (task, out) => {
+        const lead = await this.leadFor(task);
+        const { keys } = task.inputSnapshot as { keys: string[] };
+        const kit = (lead.applyKit ?? {}) as Record<string, unknown>;
+        const aiAnswers = { ...((kit.aiAnswers as Record<string, string>) ?? {}), ...Object.fromEntries(out.answers.filter((a) => keys.includes(a.key)).map((a) => [a.key, a.answer])) };
+        const updated = await this.prisma.jobLead.update({ where: { id: lead.id }, data: { applyKit: { ...kit, aiAnswers, ...(out.coverNote && { aiCoverNote: out.coverNote }) } as Prisma.InputJsonValue } });
+        if (!['SUBMITTED', 'APPLYING', 'REJECTED', 'WITHDRAWN', 'INTERVIEW'].includes(updated.status)) await this.autoApply.prepareKit(updated, task.createdById ?? undefined);
+        return { outputRef: { leadId: lead.id, answers: Object.keys(aiAnswers).length }, review: false };
+      },
+    },
+
+    job_application: {
+      instruction: 'Apply to this job in a visible browser (Claude in Chrome) using ONLY the apply kit answers and the attached CV file. Stop and report BLOCKED on any CAPTCHA, login, OTP or human-verification page: never try to bypass it. Never invent answers: report missing required fields as NEEDS_ATTENTION. Answer consent / declaration / demographic questions only as the kit says. Submit only when "autoSubmit" is true and every required field is filled; then report SUBMITTED with the exact confirmation text and URL you saw.',
+      context: async (task) => {
+        const lead = await this.leadFor(task);
+        const cfg = await this.autoApply.config(task.workspaceId);
+        const resume = lead.resumeId ? await this.prisma.resumeDocument.findUnique({ where: { id: lead.resumeId }, select: { fileName: true } }) : null;
+        return {
+          job: { title: lead.title, company: lead.company, applyUrl: lead.applyUrl ?? lead.canonicalUrl, atsType: lead.atsType },
+          autoSubmit: cfg.autoSubmit, kit: lead.applyKit, cvFile: resume ? `cv${resume.fileName.match(/\.[a-z0-9]+$/i)?.[0] ?? ''}` : null,
+          duplicateCheck: (await this.autoApply.duplicateReason(lead)) ?? 'none',
+        };
+      },
+      apply: async (task, out) => {
+        const lead = await this.leadFor(task);
+        const runner = `task:${task.id}`;
+        const existing = await this.prisma.applyAttempt.findFirst({ where: { leadId: lead.id, runner } });
+        if (existing) return { outputRef: { leadId: lead.id, attemptId: existing.id, status: existing.status }, review: false }; // idempotent re-import
+        const already = await this.prisma.applyAttempt.findFirst({ where: { leadId: lead.id, status: 'SUBMITTED' } });
+        let status: 'SUBMITTED' | 'BLOCKED' | 'NEEDS_ATTENTION' | 'FAILED' = out.status;
+        let reason = out.notes;
+        if (status === 'SUBMITTED') {
+          const v = verifyEvidence({ confirmationText: out.confirmationText, confirmationUrl: out.confirmationUrl });
+          if (!v.ok) { status = 'NEEDS_ATTENTION'; reason = `${v.reason}: confirm on the site`; }
+        }
+        const attemptNo = (await this.prisma.applyAttempt.count({ where: { leadId: lead.id } })) + 1;
+        const attempt = await this.prisma.applyAttempt.create({
+          data: {
+            workspaceId: task.workspaceId, leadId: lead.id, attemptNo, method: 'AGENT', runner, status: status === 'FAILED' ? 'FAILED' : status,
+            evidence: { confirmationUrl: out.confirmationUrl, confirmationText: out.confirmationText } as Prisma.InputJsonValue, filledFields: out.filledFields as Prisma.InputJsonValue,
+            missingFields: out.missingFields, error: reason, submitClickedAt: status === 'SUBMITTED' ? new Date() : undefined, finishedAt: new Date(),
+          },
+        });
+        if (!already && !['SUBMITTED', 'REJECTED', 'WITHDRAWN', 'INTERVIEW'].includes(lead.status)) {
+          await this.prisma.jobLead.update({ where: { id: lead.id }, data: { status: status === 'SUBMITTED' ? 'SUBMITTED' : 'NEEDS_ATTENTION', statusReason: status === 'SUBMITTED' ? 'Submitted by coding agent' : reason ?? `Agent reported ${status}` } });
+        }
+        return { outputRef: { leadId: lead.id, attemptId: attempt.id, status }, review: false };
+      },
+    },
   };
+
+  private async leadFor(task: AgentTask) {
+    const { leadId } = task.inputSnapshot as { leadId: string };
+    return this.prisma.jobLead.findFirstOrThrow({ where: { id: leadId, workspaceId: task.workspaceId } });
+  }
 }

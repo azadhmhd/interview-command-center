@@ -61,7 +61,7 @@ export class TasksService {
     const ws = await this.prisma.workspace.findUniqueOrThrow({ where: { id: task.workspaceId } });
     const llmStatus = await this.llm.status(task.workspaceId);
     let r = route(task.type, readSettings(ws.settings), llmStatus, config.claudeCli.enabled);
-    if (forceMethod === 'llm') {
+    if (forceMethod === 'llm' && task.type !== 'job_application') {
       if (!llmStatus.available) throw new BadRequestException(`LLM unavailable: ${llmStatus.reason}`);
       r = { method: 'llm', state: 'queued', reason: 'User requested the LLM endpoint' };
     }
@@ -128,6 +128,7 @@ export class TasksService {
     let r = route(t.type, readSettings(ws.settings), llm, config.claudeCli.enabled);
     if (method === 'llm') {
       if (!llm.available) throw new BadRequestException(`LLM unavailable: ${llm.reason}`);
+      if (t.type === 'job_application') throw new BadRequestException('Applying needs a browser; run this task with a coding agent');
       r = { method: 'llm', state: 'queued', reason: 'User requested the LLM endpoint' };
     }
     if (r.state === 'ready_for_agent' && t.state === 'ready_for_agent') {

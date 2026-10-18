@@ -1,0 +1,50 @@
+{
+  "$id": "icc/job_match",
+  "title": "job_match",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Semantic fit 0-100 based only on the job text and the candidate facts"
+    },
+    "strengths": {
+      "default": [],
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "gaps": {
+      "default": [],
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "mandatoryMissing": {
+      "default": [],
+      "description": "Required qualifications the candidate facts do not show",
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "explanation": {
+      "type": "string",
+      "maxLength": 3000
+    }
+  },
+  "required": [
+    "score",
+    "explanation"
+  ]
+}

@@ -1,7 +1,7 @@
 'use client';
 import {
   BarChart3, Bot, Briefcase, CalendarClock, GraduationCap, LayoutDashboard, Library, LogOut, Menu, MessageSquarePlus,
-  Mic, Repeat, Settings, Share2, Sparkles, Target, User, X,
+  Mic, Radar, Repeat, Rocket, Send, Settings, Share2, SlidersHorizontal, Sparkles, Target, User, Users, X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -23,6 +23,13 @@ const NAV = [
     { href: '/mock', label: 'Mock interviews', icon: Mic },
     { href: '/questions', label: 'Question library', icon: Library },
     { href: '/revision', label: 'Revision queue', icon: Repeat },
+  ] },
+  { group: 'Auto Apply', items: [
+    { href: '/auto-apply', label: 'Discover jobs', icon: Radar, exact: true },
+    { href: '/auto-apply/queue', label: 'Apply queue', icon: Send },
+    { href: '/auto-apply/sources', label: 'Job sources', icon: Rocket },
+    { href: '/auto-apply/recruiters', label: 'Recruiters', icon: Users },
+    { href: '/auto-apply/settings', label: 'Auto Apply settings', icon: SlidersHorizontal },
   ] },
   { group: 'Automation', items: [
     { href: '/tasks', label: 'Agent task queue', icon: Bot },
@@ -61,7 +68,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div key={g.group}>
           <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted">{g.group}</p>
           {g.items.map((i) => {
-            const active = path === i.href || path.startsWith(i.href + '/');
+            const active = path === i.href || (!('exact' in i && i.exact) && path.startsWith(i.href + '/')) || (i.href === '/auto-apply' && path.startsWith('/auto-apply/leads'));
             return (
               <Link key={i.href} href={i.href} onClick={() => setOpen(false)} aria-current={active ? 'page' : undefined}
                 className={cn('flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors', active ? 'bg-accent-soft text-accent font-medium' : 'text-muted hover:bg-surface-2 hover:text-text')}>

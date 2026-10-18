@@ -4,6 +4,7 @@
 |---|---|---|---|
 | Unit | `pnpm test:unit` | task state machine & backoff, routing policy, deterministic planner, SM-2, milestone/quiet-hours scheduling, SSRF URL guard | nothing |
 | API end-to-end | `pnpm test:e2e` | all 20 acceptance criteria through real HTTP against PostgreSQL + Redis, a fake OpenAI-compatible server, a stub Claude CLI, two-user isolation & sharing, auth flows | `pnpm infra:up` |
+| Auto Apply runner | `pnpm test:runner` | apply engine against local mock ATS forms: submit-intent ordering, evidence, CAPTCHA/login stops, unknown questions, prefill, profile isolation | Playwright Chromium |
 | UI end-to-end | `pnpm test:ui` | register → application → round → capture → prepare → practice → self-evaluate → library → dashboard in Chromium | running stack on :3000/:4000 |
 | Typecheck | `pnpm lint` | strict TypeScript, both apps | — |
 

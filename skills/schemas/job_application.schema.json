@@ -1,0 +1,68 @@
+{
+  "$id": "icc/job_application",
+  "title": "job_application",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "BLOCKED",
+        "NEEDS_ATTENTION",
+        "FAILED"
+      ]
+    },
+    "confirmationUrl": {
+      "type": "string",
+      "maxLength": 2000,
+      "format": "uri"
+    },
+    "confirmationText": {
+      "description": "Text of the confirmation page/message seen after submitting",
+      "type": "string",
+      "maxLength": 4000
+    },
+    "filledFields": {
+      "default": [],
+      "maxItems": 200,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "label"
+        ]
+      }
+    },
+    "missingFields": {
+      "default": [],
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "notes": {
+      "type": "string",
+      "maxLength": 3000
+    }
+  },
+  "required": [
+    "status"
+  ]
+}

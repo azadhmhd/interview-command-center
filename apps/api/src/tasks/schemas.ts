@@ -94,6 +94,26 @@ export const OUTPUT_SCHEMAS = {
       .describe('Only questions that appear in a cited public source'),
     limitations: str(3000).describe('What you could not access or verify'),
   }),
+  job_match: z.object({
+    score: z.number().min(0).max(100).describe('Semantic fit 0-100 based only on the job text and the candidate facts'),
+    strengths: list(10, 300),
+    gaps: list(10, 300),
+    mandatoryMissing: list(10, 300).describe('Required qualifications the candidate facts do not show'),
+    explanation: str(3000),
+  }),
+  apply_answers: z.object({
+    coverNote: str(6000).optional().describe('Short cover note using only facts from the context'),
+    answers: z.array(z.object({ key: str(200), answer: str(4000) })).max(40).default([])
+      .describe('Answers ONLY for the requested open-ended question keys; never for factual or sensitive questions'),
+  }),
+  job_application: z.object({
+    status: z.enum(['SUBMITTED', 'BLOCKED', 'NEEDS_ATTENTION', 'FAILED']),
+    confirmationUrl: z.string().url().max(2000).optional(),
+    confirmationText: str(4000).optional().describe('Text of the confirmation page/message seen after submitting'),
+    filledFields: z.array(z.object({ label: str(500), value: str(4000).optional(), source: str(40).optional() })).max(200).default([]),
+    missingFields: list(100, 500),
+    notes: str(3000).optional(),
+  }),
 } as const;
 
 export type TaskType = keyof typeof OUTPUT_SCHEMAS;
@@ -111,4 +131,7 @@ export const TASK_SKILLS: Record<TaskType, string> = {
   gap_analysis: 'icc-evaluate-answer',
   mock_generation: 'icc-model-answers',
   company_research: 'icc-research-patterns',
+  job_match: 'icc-evaluate-answer',
+  apply_answers: 'icc-model-answers',
+  job_application: 'icc-auto-apply',
 };

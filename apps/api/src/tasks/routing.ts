@@ -15,6 +15,9 @@ export const DEFAULT_ROUTES: Record<string, 'llm' | 'agent' | 'auto'> = {
   gap_analysis: 'llm',
   mock_generation: 'llm',
   company_research: 'agent', // needs web access → subscription agent
+  job_match: 'llm',
+  apply_answers: 'llm',
+  job_application: 'agent', // needs a real browser → always a manual agent session (Claude in Chrome)
 };
 
 export interface Route {
@@ -26,6 +29,8 @@ export interface Route {
 /** Pure routing decision. Never silently switches providers: every fallback is recorded in `reason`. */
 export function route(type: string, settings: WorkspaceSettings, llm: LlmStatus, cliEnabled: boolean): Route {
   const pref = settings.routing[type] ?? DEFAULT_ROUTES[type] ?? 'llm';
+  // Filling a live application form needs a visible browser the headless CLI and LLM don't have.
+  if (type === 'job_application') return { method: 'agent_manual', state: 'ready_for_agent', reason: 'Applying needs a browser → run it with Claude Code + Claude in Chrome (export the task package)' };
   const agent = (why: string): Route => cliEnabled
     ? { method: 'agent_cli', state: 'queued', reason: `${why} → Claude Code headless adapter` }
     : { method: 'agent_manual', state: 'ready_for_agent', reason: `${why} → waiting for manual agent execution (export the task package)` };

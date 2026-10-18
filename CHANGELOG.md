@@ -5,6 +5,18 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Auto Apply** section, kept separate from the application tracker:
+  - Job discovery from official Greenhouse, Lever, Ashby, SmartRecruiters and Workable APIs, plus pasted job-alert emails and job URLs.
+  - Normalisation, cross-source dedupe and explainable fit scoring with hard eligibility blockers.
+  - CV selection, and apply kits built only from your profile and saved standing answers.
+  - Approval queue with an optional auto-submit mode and guardrails: score threshold, daily cap, submit-intent
+    duplicate protection, required confirmation evidence, CAPTCHA/login stops.
+  - Local Playwright apply runner with isolated browser profiles.
+  - `icc-auto-apply` skill for Claude in Chrome.
+  - Recruiter contacts with CSV export.
+  - Explicit "Move to tracker".
+
 ## [0.1.0] - 2026-10-18
 
 ### Added

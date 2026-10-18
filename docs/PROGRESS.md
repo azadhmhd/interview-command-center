@@ -51,3 +51,19 @@ Last full verification: 2026-10-18 — typecheck ✓ · unit 22/22 ✓ · API e2
 - Task creation tried `queued → queued` → tasks are created `scheduled` and routed
 - Practice model answer lookup preferred the canonical entry over the lesson → lesson/session first
 - `nest start --watch` produced an empty dist with incremental builds → incremental off for builds
+
+## Auto Apply (added 2026-10-19)
+
+| Item | Status | Evidence |
+|---|---|---|
+| Separate data model (5 new tables, tracker untouched) | [x] | migration `20261019090000_auto_apply`; e2e asserts no tracker rows are created |
+| Greenhouse / Lever / Ashby / SmartRecruiters adapters | [x] | unit fixtures + live runs: GitLab 232, OpenAI 813, Ziina 13, Careem 14 jobs normalised and scored |
+| Workable adapter | [~] | endpoint verified live; no account with open roles tested |
+| Alert-email + URL import | [x] | unit (LinkedIn HTML, Bayt text) + e2e |
+| Explainable scoring + blockers | [x] | unit tests; live data calibration fixed restricted-remote and false technology matches |
+| Approval, auto-submit guardrails, duplicate prevention, evidence | [x] | e2e: single claim, submit-intent, unverified → needs attention, verified-not-submitted unlock (audited), daily cap |
+| Crash recovery (never retried after Submit) | [x] | e2e via worker tick |
+| Apply runner (isolated profiles) | [x] / [~] | 8 Playwright tests on local mock forms; **not exercised on real job sites** (would submit real applications) |
+| Claude Code `icc-auto-apply` skill path | [x] / [~] | routing forced to manual browser session + evidence validation (e2e); real Claude in Chrome run not executed |
+| Recruiter contacts + CSV | [x] | e2e |
+| User isolation | [x] | e2e: second user gets 404 / empty everywhere |
