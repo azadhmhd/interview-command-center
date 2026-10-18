@@ -13,6 +13,10 @@ crash course: with any OpenAI-compatible LLM, with your Claude Code / Cursor sub
 ![NestJS 11](https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs)
 ![PostgreSQL 17](https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+![Status: under construction](https://img.shields.io/badge/status-under%20construction-orange)
+
+> 🚧 **Still under construction.** It's in the "we'll get back to you" stage of its own hiring process: new features
+> are coming, bugs are being grilled like a system design round. **Let's get hired.** 💼
 
 <img src="docs/images/dashboard.png" alt="Dashboard" width="900">
 
