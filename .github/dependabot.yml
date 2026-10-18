@@ -1,5 +1,7 @@
 version: 2
 updates:
+  # npm: one grouped PR per week with minor + patch updates only.
+  # Major versions are upgraded deliberately by hand (see docs/KNOWN_LIMITATIONS.md).
   - package-ecosystem: npm
     directory: /
     schedule: { interval: weekly }
@@ -8,18 +10,19 @@ updates:
       minor-and-patch:
         update-types: [minor, patch]
     ignore:
-      # majors pinned deliberately (see docs/KNOWN_LIMITATIONS.md); upgrade by hand
-      - dependency-name: "@nestjs/*"
+      - dependency-name: "*"
         update-types: [version-update:semver-major]
-      - dependency-name: "prisma"
-        update-types: [version-update:semver-major]
-      - dependency-name: "@prisma/client"
-        update-types: [version-update:semver-major]
-      - dependency-name: "typescript"
-        update-types: [version-update:semver-major]
+  # GitHub Actions: grouped into one PR per week.
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    groups:
+      github-actions:
+        patterns: ["*"]
+  # Docker base image: stay on the Node 22 LTS line (no major jumps).
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+    ignore:
+      - dependency-name: node
+        update-types: [version-update:semver-major]
