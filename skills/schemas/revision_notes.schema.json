@@ -1,0 +1,44 @@
+{
+  "$id": "icc/revision_notes",
+  "title": "revision_notes",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "finalNotes": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 30000,
+      "description": "Markdown, concise, interview-day ready"
+    },
+    "keyPoints": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "questionsToAsk": {
+      "default": [],
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "risks": {
+      "default": [],
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    }
+  },
+  "required": [
+    "finalNotes"
+  ]
+}

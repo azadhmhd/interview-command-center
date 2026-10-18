@@ -1,0 +1,50 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please **don't include real CVs, interview data or API keys**.
+        Security issues → use private reporting (see SECURITY.md), not this form.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to …
+        2. Click …
+        3. See error …
+    validations:
+      required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: How are you running it?
+      options: [Docker Compose, Local development (pnpm dev), Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: ai
+    attributes:
+      label: AI setup
+      multiple: true
+      options: [None, OpenAI-compatible LLM (local), OpenAI-compatible LLM (hosted), Claude Code manual, Claude Code automatic, Cursor, Other agent]
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: v0.1.0 or commit SHA
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: API / worker logs or the task's "Last error". Remove any secrets.
+      render: shell

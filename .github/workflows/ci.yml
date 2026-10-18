@@ -1,0 +1,52 @@
+name: CI
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env: { POSTGRES_USER: icc, POSTGRES_PASSWORD: icc, POSTGRES_DB: icc }
+        ports: ["5434:5432"]
+        options: --health-cmd "pg_isready -U icc" --health-interval 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ["6380:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://icc:icc@localhost:5434/icc
+      TEST_DATABASE_URL: postgresql://icc:icc@localhost:5434/icc_test
+      REDIS_URL: redis://localhost:6380
+      APP_ENCRYPTION_KEY: ${{ secrets.CI_ENCRYPTION_KEY || 'MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.6.2 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter api exec prisma generate
+      - run: pnpm -r typecheck
+      - run: pnpm --filter api test
+      - run: pnpm --filter api test:e2e
+      - run: pnpm --filter api build
+      - run: pnpm --filter web build
+      - name: UI smoke test (Playwright)
+        run: |
+          pnpm --filter api exec prisma migrate deploy
+          (cd apps/api && node dist/main.js &) && (cd apps/api && node dist/worker.js &)
+          pnpm --filter web exec playwright install --with-deps chromium
+          (cd apps/web && pnpm start &) && npx wait-on http://localhost:3000/login http://localhost:4000/api/health
+          pnpm --filter web test:e2e
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: APP_ENCRYPTION_KEY=MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA= docker compose build

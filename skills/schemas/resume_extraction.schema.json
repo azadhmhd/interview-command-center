@@ -1,0 +1,109 @@
+{
+  "$id": "icc/resume_extraction",
+  "title": "resume_extraction",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "headline": {
+      "type": "string",
+      "maxLength": 300
+    },
+    "yearsExperience": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 60
+    },
+    "roles": {
+      "default": [],
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "company": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "start": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "end": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "highlights": {
+            "default": [],
+            "maxItems": 15,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 500
+            }
+          }
+        },
+        "required": [
+          "company",
+          "title"
+        ]
+      }
+    },
+    "skills": {
+      "default": [],
+      "maxItems": 80,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 80
+      }
+    },
+    "education": {
+      "default": [],
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "projects": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "required": [
+          "name",
+          "summary"
+        ]
+      }
+    },
+    "certifications": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    }
+  }
+}

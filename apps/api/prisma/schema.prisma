@@ -1,0 +1,687 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── Identity & tenancy ─────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions       Session[]
+  resetTokens    PasswordResetToken[]
+  memberships    WorkspaceMembership[]
+  sharesReceived RecordShare[]         @relation("ShareGrantee")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+enum Role {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  personal  Boolean  @default(false)
+  /// statuses, roundTypes, schedule defaults, quiet hours, routing policy — see workspace-settings.ts
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships  WorkspaceMembership[]
+  invitations  Invitation[]
+  profile      CandidateProfile?
+  resumes      ResumeDocument[]
+  applications Application[]
+  rounds       InterviewRound[]
+  occurrences  InterviewQuestionOccurrence[]
+  canonicals   CanonicalQuestion[]
+  courses      PreparationCourse[]
+  sessions     PracticeSession[]
+  attempts     AnswerAttempt[]
+  tasks        AgentTask[]
+  reminders    Reminder[]
+  llmConfig    LLMConfiguration?
+  shares       RecordShare[]
+  research     ResearchSource[]
+  attachments  Attachment[]
+  usage        AIUsageRecord[]
+  activities   ApplicationActivity[]
+  contacts     Contact[]
+}
+
+model WorkspaceMembership {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        Role
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email       String
+  role        Role
+  tokenHash   String    @unique
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([email])
+}
+
+enum ShareResource {
+  APPLICATION
+  COURSE
+}
+
+enum SharePermission {
+  VIEW
+  EDIT
+}
+
+model RecordShare {
+  id           String          @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  resourceType ShareResource
+  resourceId   String
+  granteeId    String
+  grantee      User            @relation("ShareGrantee", fields: [granteeId], references: [id], onDelete: Cascade)
+  permission   SharePermission @default(VIEW)
+  createdById  String
+  createdAt    DateTime        @default(now())
+  revokedAt    DateTime?
+
+  @@unique([resourceType, resourceId, granteeId])
+  @@index([granteeId])
+}
+
+model AuditEvent {
+  id           String   @id @default(cuid())
+  workspaceId  String?
+  userId       String?
+  action       String
+  resourceType String?
+  resourceId   String?
+  ip           String?
+  data         Json?
+  createdAt    DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([userId, createdAt])
+}
+
+// ───────────────────────── Candidate ─────────────────────────
+
+model CandidateProfile {
+  id               String    @id @default(cuid())
+  workspaceId      String    @unique
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fullName         String?
+  headline         String?
+  location         String?
+  yearsExperience  Int?
+  targetRoles      String[]
+  secondaryRoles   String[]
+  workBalance      String?
+  coreTech         String[]
+  aiInterests      String[]
+  noticePeriodDays Int?
+  salaryTarget     Int?
+  salaryCurrency   String    @default("USD")
+  summary          String?
+  /// facts the user has confirmed (from CV review). AI suggestions live on ResumeDocument.structured.
+  confirmedFacts   Json?
+  updatedAt        DateTime  @updatedAt
+}
+
+model ResumeDocument {
+  id               String        @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  label            String
+  version          Int
+  fileName         String
+  mimeType         String
+  sizeBytes        Int
+  storagePath      String
+  sha256           String
+  extractedText    String?
+  /// AI-inferred structure: never treated as fact until confirmed
+  structured       Json?
+  structuredStatus String        @default("none") // none | ai_inferred | confirmed
+  isDefault        Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  applications     Application[]
+
+  @@unique([workspaceId, label, version])
+}
+
+// ───────────────────────── Applications ─────────────────────────
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Application {
+  id                String         @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  companyName       String
+  companyWebsite    String?
+  location          String?
+  companyNotes      String?
+  jobTitle          String
+  seniority         String?
+  jobDescription    String?
+  jobUrl            String?
+  source            String?
+  appliedAt         DateTime?
+  resumeId          String?
+  resume            ResumeDocument? @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  coverLetter       String?
+  salaryExpectation Int?
+  salaryCurrency    String         @default("USD")
+  benefits          String?
+  noticePeriodDays  Int?
+  status            String         @default("Saved")
+  priority          Priority       @default(MEDIUM)
+  nextAction        String?
+  nextActionAt      DateTime?
+  offerDetails      String?
+  rejectionReason   String?
+  withdrawalReason  String?
+  /// normalized company|title for duplicate detection
+  dedupeKey         String
+  archived          Boolean        @default(false)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  activities  ApplicationActivity[]
+  contacts    Contact[]
+  rounds      InterviewRound[]
+  occurrences InterviewQuestionOccurrence[]
+  courses     PreparationCourse[]
+  reminders   Reminder[]
+  attachments Attachment[]
+  research    ResearchSource[]
+  tasks       AgentTask[]
+
+  @@index([workspaceId, status])
+  @@index([workspaceId, dedupeKey])
+}
+
+model ApplicationActivity {
+  id            String      @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  type          String // note | communication | status_change | round | created | course | system
+  message       String
+  data          Json?
+  actorId       String?
+  createdAt     DateTime    @default(now())
+
+  @@index([applicationId, createdAt])
+}
+
+model Contact {
+  id            String      @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  name          String
+  role          String      @default("recruiter") // recruiter | hiring_manager | interviewer | other
+  email         String?
+  phone         String?
+  linkedin      String?
+  notes         String?
+  createdAt     DateTime    @default(now())
+}
+
+model Attachment {
+  id            String          @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId String?
+  application   Application?    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  roundId       String?
+  round         InterviewRound? @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  kind          String          @default("file") // file | link
+  label         String
+  fileName      String?
+  mimeType      String?
+  sizeBytes     Int?
+  storagePath   String?
+  url           String?
+  createdAt     DateTime        @default(now())
+}
+
+// ───────────────────────── Interviews ─────────────────────────
+
+model InterviewRound {
+  id                  String      @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId       String
+  application         Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  sequence            Int
+  type                String // configurable, e.g. recruiter_screen, technical_screen, coding, system_design ...
+  title               String?
+  scheduledAt         DateTime?
+  durationMinutes     Int?
+  interviewer         String?
+  format              String? // video | phone | onsite | take_home
+  meetingLink         String?
+  status              String      @default("planned") // planned | scheduled | completed | cancelled
+  outcome             String      @default("pending") // pending | passed | failed | unknown
+  feedback            String?
+  nextSteps           String?
+  notes               String?
+  confidence          Int?
+  studyHoursAvailable Int?
+  prepIntensity       String      @default("STANDARD")
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  occurrences InterviewQuestionOccurrence[]
+  courses     PreparationCourse[]
+  reminders   Reminder[]
+  attachments Attachment[]
+  tasks       AgentTask[]
+
+  @@index([workspaceId, scheduledAt])
+  @@index([applicationId, sequence])
+}
+
+enum QuestionSource {
+  REPORTED // actually asked, reported by the user
+  PUBLIC_REPORT // found in a public interview report
+  AI_PREDICTED // predicted by AI
+  PRACTICE // generated for practice (AI or template)
+}
+
+model InterviewQuestionOccurrence {
+  id                  String             @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId       String?
+  application         Application?       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  roundId             String?
+  round               InterviewRound?    @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  canonicalQuestionId String?
+  canonical           CanonicalQuestion? @relation(fields: [canonicalQuestionId], references: [id], onDelete: SetNull)
+  source              QuestionSource     @default(REPORTED)
+  prompt              String
+  /// immutable once non-empty — enforced in QuestionsService
+  originalAnswer      String?
+  followUps           String?
+  problemStatement    String?
+  codeSnippet         String?
+  codeLanguage        String?
+  testCases           String?
+  confidence          Int?
+  conceptsCorrect     String[]
+  conceptsPartial     String[]
+  conceptsMissed      String[]
+  mistakes            String?
+  communicationNotes  String?
+  improvedAnswer      String?
+  improvedAnswerBy    String? // ai | user | agent
+  approvedAnswer      String?
+  approvedAt          DateTime?
+  difficulty          String?
+  tags                String[]
+  sourceUrl           String?
+  sourceTitle         String?
+  askedAt             DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  /// GENERATED ALWAYS (see init migration) — never written by the app
+  search              Unsupported("tsvector")?
+
+  attempts AnswerAttempt[]
+
+  @@index([workspaceId, source])
+  @@index([search], type: Gin)
+  @@index([tags], type: Gin)
+  @@index([roundId])
+}
+
+model CanonicalQuestion {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  prompt         String
+  normalizedKey  String
+  tags           String[]
+  difficulty     String?
+  roundTypes     String[]
+  masteryStatus  String    @default("new") // new | learning | reviewing | mastered
+  confidence     Int?
+  bestAnswer     String?
+  // SM-2 spaced repetition
+  easeFactor     Float     @default(2.5)
+  intervalDays   Int       @default(0)
+  repetitions    Int       @default(0)
+  dueAt          DateTime  @default(now())
+  lastReviewedAt DateTime?
+  inRevision     Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  /// GENERATED ALWAYS (see init migration)
+  search         Unsupported("tsvector")?
+
+  occurrences InterviewQuestionOccurrence[]
+  attempts    AnswerAttempt[]
+
+  @@unique([workspaceId, normalizedKey])
+  @@index([workspaceId, dueAt])
+  @@index([search], type: Gin)
+  @@index([tags], type: Gin)
+}
+
+// ───────────────────────── Preparation ─────────────────────────
+
+model PreparationCourse {
+  id             String              @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId  String?
+  application    Application?        @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  roundId        String?
+  round          InterviewRound?     @relation(fields: [roundId], references: [id], onDelete: SetNull)
+  title          String
+  mode           String              @default("STANDARD") // QUICK | STANDARD | DEEP
+  status         String              @default("ready") // ready | generating | failed
+  generator      String              @default("deterministic") // deterministic | llm | agent
+  model          String?
+  contextSnapshot Json
+  contextHash    String
+  /// expectations, competencies, topic checklist, schedule, readiness, risks, finalNotes, questionsToAsk
+  overview       Json
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  lessons        PreparationModule[]
+  sessions       PracticeSession[]
+  tasks          AgentTask[]
+}
+
+model PreparationModule {
+  id                 String            @id @default(cuid())
+  courseId           String
+  course             PreparationCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  key                String // stable slug: regeneration merges by key
+  order              Int
+  kind               String // concept | coding | system_design | behavioral | flashcards | mock | revision | recruiter
+  title              String
+  objectives         String[]
+  estimatedMinutes   Int
+  explanation        String
+  examples           String?
+  /// [{prompt, modelAnswer?, followUps?: string[], source}]
+  questions          Json              @default("[]")
+  evaluationCriteria String[]
+  commonMistakes     String[]
+  linkedOccurrenceIds String[]
+  scheduledDay       Int? // day index in schedule (0 = first study day)
+  status             String            @default("not_started") // not_started | in_progress | completed
+  revisionStatus     String            @default("none") // none | due | done
+  completedAt        DateTime?
+  version            Int               @default(1)
+  generator          String            @default("deterministic")
+  updatedAt          DateTime          @updatedAt
+
+  attempts AnswerAttempt[]
+
+  @@unique([courseId, key])
+}
+
+model PracticeSession {
+  id          String             @id @default(cuid())
+  workspaceId String
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  courseId    String?
+  course      PreparationCourse? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  roundId     String?
+  kind        String             @default("mock") // mock | practice | revision
+  roundType   String?
+  title       String
+  learningMode Boolean           @default(false)
+  /// snapshot: [{prompt, modelAnswer?, occurrenceId?, canonicalQuestionId?, source}]
+  questions   Json
+  status      String             @default("in_progress") // in_progress | completed
+  createdAt   DateTime           @default(now())
+  completedAt DateTime?
+  attempts    AnswerAttempt[]
+}
+
+model AnswerAttempt {
+  id                  String                       @id @default(cuid())
+  workspaceId         String
+  workspace           Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId              String
+  occurrenceId        String?
+  occurrence          InterviewQuestionOccurrence? @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  canonicalQuestionId String?
+  canonical           CanonicalQuestion?           @relation(fields: [canonicalQuestionId], references: [id], onDelete: Cascade)
+  sessionId           String?
+  session             PracticeSession?             @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  lessonId            String?
+  lesson              PreparationModule?           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  questionIndex       Int?
+  prompt              String
+  answer              String
+  /// client-supplied key so double-submits never create two attempts
+  clientKey           String?
+  createdAt           DateTime                     @default(now())
+  evaluation          AnswerEvaluation?
+
+  @@unique([workspaceId, clientKey])
+  @@index([canonicalQuestionId, createdAt])
+}
+
+model AnswerEvaluation {
+  id              String        @id @default(cuid())
+  attemptId       String        @unique
+  attempt         AnswerAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  source          String // ai | self | agent
+  model           String?
+  score           Float // 0-10
+  /// {correctness, completeness, depth, clarity} each 0-10
+  rubric          Json
+  missingConcepts String[]
+  incorrectClaims String[]
+  improvements    String[]
+  strongAnswer    String?
+  followUps       String[]
+  confidence      String        @default("medium") // low | medium | high
+  createdAt       DateTime      @default(now())
+}
+
+model ResearchSource {
+  id            String       @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId String?
+  application   Application? @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  url           String
+  title         String
+  summary       String
+  retrievedAt   DateTime
+  createdAt     DateTime     @default(now())
+
+  @@unique([workspaceId, applicationId, url])
+}
+
+model Reminder {
+  id             String          @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId  String?
+  application    Application?    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  roundId        String?
+  round          InterviewRound? @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  kind           String // follow_up | prep_milestone | interview_day | post_interview | revision | custom
+  title          String
+  body           String?
+  dueAt          DateTime
+  status         String          @default("pending") // pending | fired | done | dismissed
+  firedAt        DateTime?
+  idempotencyKey String          @unique
+  createdAt      DateTime        @default(now())
+
+  @@index([status, dueAt])
+  @@index([workspaceId, dueAt])
+}
+
+// ───────────────────────── Execution ─────────────────────────
+
+model AgentTask {
+  id              String             @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdById     String?
+  type            String
+  title           String
+  priority        Int                @default(5) // 1 = highest
+  state           String             @default("queued")
+  idempotencyKey  String             @unique
+  executionMethod String // llm | agent_cli | agent_manual | deterministic
+  routingReason   String?
+  inputSnapshot   Json
+  inputHash       String
+  applicationId   String?
+  application     Application?       @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  roundId         String?
+  round           InterviewRound?    @relation(fields: [roundId], references: [id], onDelete: SetNull)
+  courseId        String?
+  course          PreparationCourse? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  scheduledFor    DateTime           @default(now())
+  leaseOwner      String?
+  leaseExpiresAt  DateTime?
+  attempts        Int                @default(0)
+  maxAttempts     Int                @default(3)
+  timeoutMs       Int                @default(180000)
+  nextRetryAt     DateTime?
+  lastError       String?
+  outputRef       Json?
+  validation      Json?
+  resultHash      String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  submittedAt     DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+
+  history AgentTaskAttempt[]
+
+  @@index([state, scheduledFor])
+  @@index([workspaceId, state])
+}
+
+model AgentTaskAttempt {
+  id         String    @id @default(cuid())
+  taskId     String
+  task       AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  attemptNo  Int
+  method     String
+  worker     String?
+  status     String // running | succeeded | failed | imported | rejected
+  error      String?
+  detail     Json?
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  @@index([taskId])
+}
+
+model AIUsageRecord {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  taskId           String?
+  host             String
+  model            String
+  purpose          String
+  promptTokens     Int?
+  completionTokens Int?
+  totalTokens      Int?
+  latencyMs        Int
+  success          Boolean
+  error            String?
+  createdAt        DateTime  @default(now())
+
+  @@index([workspaceId, createdAt])
+}
+
+model LLMConfiguration {
+  id                        String    @id @default(cuid())
+  workspaceId               String    @unique
+  workspace                 Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  enabled                   Boolean   @default(true)
+  baseUrl                   String?
+  apiKeyEncrypted           String?
+  apiKeyLast4               String?
+  model                     String?
+  evaluationModel           String?
+  timeoutMs                 Int       @default(120000)
+  maxRetries                Int       @default(2)
+  temperature               Float     @default(0.2)
+  allowExternalTransmission Boolean   @default(false)
+  /// detected: {jsonMode: bool, models: string[]}
+  capabilities              Json?
+  lastTestAt                DateTime?
+  lastTestOk                Boolean?
+  lastTestError             String?
+  lastSuccessAt             DateTime?
+  updatedAt                 DateTime  @updatedAt
+}

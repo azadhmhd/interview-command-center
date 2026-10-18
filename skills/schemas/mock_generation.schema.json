@@ -1,0 +1,42 @@
+{
+  "$id": "icc/mock_generation",
+  "title": "mock_generation",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "questions": {
+      "minItems": 1,
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 4000
+          },
+          "modelAnswer": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "followUps": {
+            "default": [],
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "questions"
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "$id": "icc/answer_improvement",
+  "title": "answer_improvement",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "improvedAnswer": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 20000
+    },
+    "conceptsCorrect": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+    "conceptsPartial": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+    "conceptsMissed": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      }
+    },
+    "mistakes": {
+      "type": "string",
+      "maxLength": 5000
+    },
+    "communicationNotes": {
+      "type": "string",
+      "maxLength": 5000
+    }
+  },
+  "required": [
+    "improvedAnswer"
+  ]
+}

@@ -1,0 +1,100 @@
+{
+  "$id": "icc/answer_evaluation",
+  "title": "answer_evaluation",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
+    "rubric": {
+      "type": "object",
+      "properties": {
+        "correctness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "completeness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "depth": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "clarity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        }
+      },
+      "required": [
+        "correctness",
+        "completeness",
+        "depth",
+        "clarity"
+      ]
+    },
+    "missingConcepts": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "incorrectClaims": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "improvements": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "strongAnswer": {
+      "type": "string",
+      "maxLength": 20000,
+      "description": "An example of a strong answer"
+    },
+    "followUps": {
+      "default": [],
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "description": "Your confidence in this evaluation"
+    }
+  },
+  "required": [
+    "score",
+    "rubric",
+    "strongAnswer",
+    "confidence"
+  ]
+}

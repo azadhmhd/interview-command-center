@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2022",
+    "lib": ["ES2023"],
+    "strict": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "outDir": "dist",
+    "sourceMap": true,
+    "incremental": true,
+    "strictPropertyInitialization": false,
+    "useUnknownInCatchVariables": true,
+    "types": ["node", "jest", "multer"]
+  },
+  "include": ["src", "test", "prisma", "scripts"]
+}

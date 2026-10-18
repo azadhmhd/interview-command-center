@@ -1,0 +1,54 @@
+{
+  "name": "interview-command-center",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted job search tracker, interview journal and AI-assisted interview preparation that works with any OpenAI-compatible LLM or your coding-agent subscription.",
+  "license": "MIT",
+  "author": "azadhmhd",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/azadhmhd/interview-command-center.git"
+  },
+  "homepage": "https://github.com/azadhmhd/interview-command-center#readme",
+  "bugs": {
+    "url": "https://github.com/azadhmhd/interview-command-center/issues"
+  },
+  "keywords": [
+    "interview-preparation",
+    "job-search",
+    "career",
+    "llm",
+    "openai-compatible",
+    "ollama",
+    "claude-code",
+    "cursor",
+    "nestjs",
+    "nextjs",
+    "prisma",
+    "self-hosted"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.6.2",
+  "scripts": {
+    "infra:up": "docker compose up -d postgres redis",
+    "infra:down": "docker compose down",
+    "dev:api": "pnpm --filter api start:dev",
+    "dev:worker": "pnpm --filter api worker:dev",
+    "dev:web": "pnpm --filter web dev",
+    "db:migrate": "pnpm --filter api prisma:migrate",
+    "db:seed": "pnpm --filter api seed",
+    "build": "pnpm -r build",
+    "test": "pnpm --filter api test && pnpm --filter api test:e2e",
+    "test:ui": "pnpm --filter web test:e2e",
+    "lint": "pnpm -r typecheck",
+    "agent:install": "node skills/install.mjs",
+    "gen:schemas": "pnpm --filter api gen:schemas && node skills/install.mjs",
+    "test:unit": "pnpm --filter api test",
+    "test:e2e": "pnpm --filter api test:e2e",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down",
+    "screenshots": "node apps/web/scripts/screenshots.mjs"
+  }
+}

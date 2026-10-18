@@ -1,0 +1,45 @@
+{
+  "$id": "icc/question_extraction",
+  "title": "question_extraction",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "questions": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 4000
+          },
+          "answer": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "followUps": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "tags": {
+            "default": [],
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 60
+            }
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "questions"
+  ]
+}

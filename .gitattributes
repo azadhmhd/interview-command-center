@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
+pnpm-lock.yaml linguist-generated=true
+skills/schemas/*.json linguist-generated=true

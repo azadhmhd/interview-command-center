@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/dist
+**/.env
+.env
+data
+agent-workspace/tasks
+**/*.tsbuildinfo
+.git
+coverage
+playwright-report
+test-results

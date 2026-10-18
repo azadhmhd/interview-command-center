@@ -1,0 +1,99 @@
+{
+  "$id": "icc/company_research",
+  "title": "company_research",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "sources": {
+      "default": [],
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2000,
+            "format": "uri"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "retrievedAt": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "summary",
+          "retrievedAt"
+        ]
+      }
+    },
+    "patterns": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "evidenceUrls": {
+            "default": [],
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        },
+        "required": [
+          "pattern"
+        ]
+      }
+    },
+    "reportedQuestions": {
+      "default": [],
+      "description": "Only questions that appear in a cited public source",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "sourceUrl": {
+            "type": "string",
+            "maxLength": 2000,
+            "format": "uri"
+          }
+        },
+        "required": [
+          "prompt",
+          "sourceUrl"
+        ]
+      }
+    },
+    "limitations": {
+      "type": "string",
+      "maxLength": 3000,
+      "description": "What you could not access or verify"
+    }
+  },
+  "required": [
+    "limitations"
+  ]
+}

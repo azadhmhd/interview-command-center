@@ -1,0 +1,12 @@
+{
+  "course_generation": "icc-prepare-interview",
+  "lesson_regeneration": "icc-prepare-interview",
+  "answer_evaluation": "icc-evaluate-answer",
+  "answer_improvement": "icc-model-answers",
+  "resume_extraction": "icc-import-validate",
+  "question_extraction": "icc-import-validate",
+  "revision_notes": "icc-final-revision",
+  "gap_analysis": "icc-evaluate-answer",
+  "mock_generation": "icc-model-answers",
+  "company_research": "icc-research-patterns"
+}

@@ -1,0 +1,88 @@
+name: icc
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://icc:icc@postgres:5432/icc
+  REDIS_URL: redis://redis:6379
+  APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?set APP_ENCRYPTION_KEY in .env}
+  APP_URL: ${APP_URL:-http://localhost:3000}
+  COOKIE_SECURE: ${COOKIE_SECURE:-false}
+  UPLOAD_DIR: /data/uploads
+  AGENT_WORKSPACE_DIR: /agent-workspace/tasks
+  LLM_ENABLED: ${LLM_ENABLED:-false}
+  LLM_BASE_URL: ${LLM_BASE_URL:-}
+  LLM_API_KEY: ${LLM_API_KEY:-}
+  LLM_MODEL: ${LLM_MODEL:-}
+  LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-120000}
+  LLM_MAX_RETRIES: ${LLM_MAX_RETRIES:-2}
+  LLM_DEFAULT_TEMPERATURE: ${LLM_DEFAULT_TEMPERATURE:-0.2}
+  LLM_ALLOW_PRIVATE_NETWORK: ${LLM_ALLOW_PRIVATE_NETWORK:-true}
+  LLM_EXTERNAL_DATA_CONSENT: ${LLM_EXTERNAL_DATA_CONSENT:-false}
+  AGENT_CLAUDE_CLI_ENABLED: ${AGENT_CLAUDE_CLI_ENABLED:-false}
+  AGENT_CLAUDE_CLI_TIMEOUT_MS: ${AGENT_CLAUDE_CLI_TIMEOUT_MS:-900000}
+  SMTP_URL: ${SMTP_URL:-}
+  MAIL_FROM: ${MAIL_FROM:-icc@localhost}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: icc
+      POSTGRES_PASSWORD: icc
+      POSTGRES_DB: icc
+    ports: ["127.0.0.1:5434:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U icc"]
+      interval: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports: ["127.0.0.1:6380:6379"]
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  api:
+    build: { context: ., target: api }
+    image: icc-api:latest
+    environment: *app-env
+    command: ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    volumes: [appdata:/data, ./agent-workspace:/agent-workspace]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      retries: 10
+
+  worker:
+    image: icc-api:latest # same image as the API, different command
+    environment:
+      <<: *app-env
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-} # only the worker runs claude; from `claude setup-token`
+    # install/refresh the agent skill pack into ./agent-workspace, then start the worker
+    command: ["sh", "-c", "node skills/install.mjs /agent-workspace && node dist/worker.js"]
+    depends_on:
+      api: { condition: service_healthy }
+    volumes: [appdata:/data, ./agent-workspace:/agent-workspace]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  web:
+    build: { context: ., target: web }
+    image: icc-web:latest
+    environment:
+      API_INTERNAL_URL: http://api:4000
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  pgdata:
+  redisdata:
+  appdata:
