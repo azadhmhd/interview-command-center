@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ApplyAttemptStatus, JobLead, JobLeadStatus, JobSource, JobSourceType, Prisma } from '@prisma/client';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { dedupeKey } from '../applications/applications';
 import { AuditService } from '../common/audit.service';
@@ -389,10 +389,14 @@ export class AutoApplyService {
     let reason = body.error;
     let screenshot: string | undefined;
     if (body.evidence?.screenshotBase64) {
-      const dir = join(config.uploadDir, ctx.workspaceId);
+      // filename from the database id (not the request), format-checked, and confined to the workspace upload dir
+      if (!/^[a-z0-9]{10,40}$/.test(a.id) || !/^[a-z0-9]{10,40}$/.test(a.workspaceId)) throw new BadRequestException('Invalid attempt');
+      const dir = resolve(config.uploadDir, a.workspaceId);
+      const file = resolve(dir, `apply-${a.id}.png`);
+      if (!dir.startsWith(resolve(config.uploadDir) + sep) || !file.startsWith(dir + sep)) throw new BadRequestException('Invalid screenshot path');
       await mkdir(dir, { recursive: true });
-      screenshot = `apply-${id}.png`;
-      await writeFile(join(dir, screenshot), Buffer.from(body.evidence.screenshotBase64, 'base64'), { mode: 0o600 });
+      await writeFile(file, Buffer.from(body.evidence.screenshotBase64, 'base64'), { mode: 0o600 });
+      screenshot = `apply-${a.id}.png`;
     }
     if (status === 'SUBMITTED') {
       if (a.status !== 'SUBMIT_CLICKED') { status = 'NEEDS_ATTENTION'; reason = 'Submit was reported without the submit-intent check'; }

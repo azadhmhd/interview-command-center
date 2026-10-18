@@ -3,7 +3,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { JobLeadStatus, JobSourceType, Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { AuditService } from '../common/audit.service';
 import { ApiZod, Ctx, CurrentCtx, optStr, zp } from '../common/http';
@@ -235,10 +235,13 @@ export class AutoApplyController {
   async screenshot(@CurrentCtx() ctx: Ctx, @Param('id') id: string, @Res() res: Response) {
     const a = await this.prisma.applyAttempt.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
     const file = (a?.evidence as { screenshot?: string } | null)?.screenshot;
-    if (!file || !/^apply-[a-z0-9]+\.png$/.test(file)) throw new NotFoundException();
+    if (!a || !file || file !== `apply-${a.id}.png` || !/^[a-z0-9]{10,40}$/.test(a.id)) throw new NotFoundException();
+    const dir = resolve(config.uploadDir, a.workspaceId);
+    const path = resolve(dir, file);
+    if (!path.startsWith(dir + sep) || !dir.startsWith(resolve(config.uploadDir) + sep)) throw new NotFoundException();
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.send(await readFile(join(config.uploadDir, ctx.workspaceId, file)));
+    res.send(await readFile(path));
   }
 
   // ── imports ──

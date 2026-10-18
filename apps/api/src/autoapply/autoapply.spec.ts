@@ -52,6 +52,14 @@ describe('source adapters normalise to one shape', () => {
 });
 
 describe('URLs, alerts and dedupe', () => {
+  it('matches hosts by exact domain, not substring', () => {
+    expect(classifyUrl('https://evil-linkedin.com/jobs/view/1').atsType).toBe('other');
+    expect(classifyUrl('https://linkedin.com.evil.io/jobs/view/1').atsType).toBe('other');
+    expect(classifyUrl('https://notworkable.com/x').atsType).toBe('other');
+    expect(classifyUrl('https://evilgreenhouse.io/acme/jobs/1').atsType).toBe('other');
+    expect(classifyUrl('https://ae.linkedin.com/jobs/view/1').atsType).toBe('linkedin');
+    expect(canonicalUrl('https://evil-linkedin.com/jobs/view/4012345678/?x=1')).toBe('https://evil-linkedin.com/jobs/view/4012345678/?x=1');
+  });
   it('classifies job URLs and strips tracking', () => {
     expect(classifyUrl('https://job-boards.greenhouse.io/acme/jobs/42?gh_src=x')).toEqual({ atsType: 'greenhouse', atsMeta: { board: 'acme', jobId: '42' } });
     expect(classifyUrl('https://jobs.lever.co/beta/abc-123')).toEqual({ atsType: 'lever', atsMeta: { board: 'beta', jobId: 'abc-123' } });

@@ -181,22 +181,25 @@ export const ADAPTERS: Partial<Record<JobSourceType, (cfg: SourceConfig) => Prom
   },
 };
 
+/** Exact domain or a real subdomain of it ("evil-linkedin.com" and "linkedin.com.evil.io" do not count). */
+export const onDomain = (host: string, domain: string) => host === domain || host.endsWith(`.${domain}`);
+
 /** Recognise the job board / ATS of a URL and the ids needed to fetch its application questions. */
 export function classifyUrl(raw: string): { atsType: string; atsMeta?: Record<string, string> } {
   let u: URL;
   try { u = new URL(raw); } catch { return { atsType: 'other' }; }
   const h = u.hostname.replace(/^www\./, '');
   const p = u.pathname.split('/').filter(Boolean);
-  if (/(^|\.)greenhouse\.io$/.test(h)) {
+  if (onDomain(h, 'greenhouse.io')) {
     const i = p.indexOf('jobs');
     return { atsType: 'greenhouse', atsMeta: i > 0 ? { board: p[i - 1], jobId: p[i + 1] } : undefined };
   }
   if (h === 'jobs.lever.co' && p.length >= 2) return { atsType: 'lever', atsMeta: { board: p[0], jobId: p[1] } };
   if (h === 'jobs.ashbyhq.com' && p.length >= 2) return { atsType: 'ashby', atsMeta: { board: p[0], jobId: p[1] } };
-  if (/smartrecruiters\.com$/.test(h)) return { atsType: 'smartrecruiters' };
-  if (/workable\.com$/.test(h)) return { atsType: 'workable' };
-  for (const [re, t] of [[/linkedin\.com$/, 'linkedin'], [/bayt\.com$/, 'bayt'], [/gulftalent\.com$/, 'gulftalent'], [/naukrigulf\.com$/, 'naukrigulf']] as const) {
-    if (re.test(h)) return { atsType: t };
+  if (onDomain(h, 'smartrecruiters.com')) return { atsType: 'smartrecruiters' };
+  if (onDomain(h, 'workable.com')) return { atsType: 'workable' };
+  for (const [d, t] of [['linkedin.com', 'linkedin'], ['bayt.com', 'bayt'], ['gulftalent.com', 'gulftalent'], ['naukrigulf.com', 'naukrigulf']] as const) {
+    if (onDomain(h, d)) return { atsType: t };
   }
   return { atsType: 'other' };
 }
@@ -204,7 +207,7 @@ export function classifyUrl(raw: string): { atsType: string; atsMeta?: Record<st
 /** Canonical form of a job URL: no tracking parameters, no fragment. LinkedIn /comm/ links collapse to /jobs/view/{id}. */
 export function canonicalUrl(raw: string): string {
   const u = new URL(raw);
-  const li = u.hostname.endsWith('linkedin.com') && u.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d+)/);
+  const li = onDomain(u.hostname, 'linkedin.com') && u.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d+)/);
   if (li) return `https://www.linkedin.com/jobs/view/${li[1]}/`;
   u.hash = '';
   for (const k of [...u.searchParams.keys()]) if (/^(utm_|trk|ref|refId|trackingId|src|source|gh_src|lever-source|ashby_)/i.test(k)) u.searchParams.delete(k);
