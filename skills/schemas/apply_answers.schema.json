@@ -1,0 +1,36 @@
+{
+  "$id": "icc/apply_answers",
+  "title": "apply_answers",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "coverNote": {
+      "description": "Short cover note using only facts from the context",
+      "type": "string",
+      "maxLength": 6000
+    },
+    "answers": {
+      "default": [],
+      "description": "Answers ONLY for the requested open-ended question keys; never for factual or sensitive questions",
+      "maxItems": 40,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "answer": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "key",
+          "answer"
+        ]
+      }
+    }
+  }
+}

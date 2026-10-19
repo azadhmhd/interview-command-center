@@ -61,26 +61,31 @@ model Workspace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships  WorkspaceMembership[]
-  invitations  Invitation[]
-  profile      CandidateProfile?
-  resumes      ResumeDocument[]
-  applications Application[]
-  rounds       InterviewRound[]
-  occurrences  InterviewQuestionOccurrence[]
-  canonicals   CanonicalQuestion[]
-  courses      PreparationCourse[]
-  sessions     PracticeSession[]
-  attempts     AnswerAttempt[]
-  tasks        AgentTask[]
-  reminders    Reminder[]
-  llmConfig    LLMConfiguration?
-  shares       RecordShare[]
-  research     ResearchSource[]
-  attachments  Attachment[]
-  usage        AIUsageRecord[]
-  activities   ApplicationActivity[]
-  contacts     Contact[]
+  memberships     WorkspaceMembership[]
+  invitations     Invitation[]
+  profile         CandidateProfile?
+  resumes         ResumeDocument[]
+  applications    Application[]
+  rounds          InterviewRound[]
+  occurrences     InterviewQuestionOccurrence[]
+  canonicals      CanonicalQuestion[]
+  courses         PreparationCourse[]
+  sessions        PracticeSession[]
+  attempts        AnswerAttempt[]
+  tasks           AgentTask[]
+  reminders       Reminder[]
+  llmConfig       LLMConfiguration?
+  shares          RecordShare[]
+  research        ResearchSource[]
+  attachments     Attachment[]
+  usage           AIUsageRecord[]
+  activities      ApplicationActivity[]
+  contacts        Contact[]
+  jobSources      JobSource[]
+  jobLeads        JobLead[]
+  applyAttempts   ApplyAttempt[]
+  recruiters      RecruiterContact[]
+  autoApplyConfig AutoApplyConfig?
 }
 
 model WorkspaceMembership {
@@ -196,6 +201,7 @@ model ResumeDocument {
   isDefault        Boolean       @default(false)
   createdAt        DateTime      @default(now())
   applications     Application[]
+  jobLeads         JobLead[]
 
   @@unique([workspaceId, label, version])
 }
@@ -209,9 +215,9 @@ enum Priority {
 }
 
 model Application {
-  id                String         @id @default(cuid())
+  id                String          @id @default(cuid())
   workspaceId       String
-  workspace         Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   companyName       String
   companyWebsite    String?
   location          String?
@@ -226,11 +232,11 @@ model Application {
   resume            ResumeDocument? @relation(fields: [resumeId], references: [id], onDelete: SetNull)
   coverLetter       String?
   salaryExpectation Int?
-  salaryCurrency    String         @default("USD")
+  salaryCurrency    String          @default("USD")
   benefits          String?
   noticePeriodDays  Int?
-  status            String         @default("Saved")
-  priority          Priority       @default(MEDIUM)
+  status            String          @default("Saved")
+  priority          Priority        @default(MEDIUM)
   nextAction        String?
   nextActionAt      DateTime?
   offerDetails      String?
@@ -238,9 +244,9 @@ model Application {
   withdrawalReason  String?
   /// normalized company|title for duplicate detection
   dedupeKey         String
-  archived          Boolean        @default(false)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  archived          Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   activities  ApplicationActivity[]
   contacts    Contact[]
@@ -349,16 +355,16 @@ enum QuestionSource {
 }
 
 model InterviewQuestionOccurrence {
-  id                  String             @id @default(cuid())
+  id                  String                   @id @default(cuid())
   workspaceId         String
-  workspace           Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace           Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   applicationId       String?
-  application         Application?       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  application         Application?             @relation(fields: [applicationId], references: [id], onDelete: Cascade)
   roundId             String?
-  round               InterviewRound?    @relation(fields: [roundId], references: [id], onDelete: Cascade)
+  round               InterviewRound?          @relation(fields: [roundId], references: [id], onDelete: Cascade)
   canonicalQuestionId String?
-  canonical           CanonicalQuestion? @relation(fields: [canonicalQuestionId], references: [id], onDelete: SetNull)
-  source              QuestionSource     @default(REPORTED)
+  canonical           CanonicalQuestion?       @relation(fields: [canonicalQuestionId], references: [id], onDelete: SetNull)
+  source              QuestionSource           @default(REPORTED)
   prompt              String
   /// immutable once non-empty — enforced in QuestionsService
   originalAnswer      String?
@@ -382,8 +388,8 @@ model InterviewQuestionOccurrence {
   sourceUrl           String?
   sourceTitle         String?
   askedAt             DateTime?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
   /// GENERATED ALWAYS (see init migration) — never written by the app
   search              Unsupported("tsvector")?
 
@@ -396,26 +402,26 @@ model InterviewQuestionOccurrence {
 }
 
 model CanonicalQuestion {
-  id             String    @id @default(cuid())
+  id             String                   @id @default(cuid())
   workspaceId    String
-  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspace      Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   prompt         String
   normalizedKey  String
   tags           String[]
   difficulty     String?
   roundTypes     String[]
-  masteryStatus  String    @default("new") // new | learning | reviewing | mastered
+  masteryStatus  String                   @default("new") // new | learning | reviewing | mastered
   confidence     Int?
   bestAnswer     String?
   // SM-2 spaced repetition
-  easeFactor     Float     @default(2.5)
-  intervalDays   Int       @default(0)
-  repetitions    Int       @default(0)
-  dueAt          DateTime  @default(now())
+  easeFactor     Float                    @default(2.5)
+  intervalDays   Int                      @default(0)
+  repetitions    Int                      @default(0)
+  dueAt          DateTime                 @default(now())
   lastReviewedAt DateTime?
-  inRevision     Boolean   @default(true)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  inRevision     Boolean                  @default(true)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
   /// GENERATED ALWAYS (see init migration)
   search         Unsupported("tsvector")?
 
@@ -431,53 +437,53 @@ model CanonicalQuestion {
 // ───────────────────────── Preparation ─────────────────────────
 
 model PreparationCourse {
-  id             String              @id @default(cuid())
-  workspaceId    String
-  workspace      Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  applicationId  String?
-  application    Application?        @relation(fields: [applicationId], references: [id], onDelete: SetNull)
-  roundId        String?
-  round          InterviewRound?     @relation(fields: [roundId], references: [id], onDelete: SetNull)
-  title          String
-  mode           String              @default("STANDARD") // QUICK | STANDARD | DEEP
-  status         String              @default("ready") // ready | generating | failed
-  generator      String              @default("deterministic") // deterministic | llm | agent
-  model          String?
+  id              String              @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  applicationId   String?
+  application     Application?        @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  roundId         String?
+  round           InterviewRound?     @relation(fields: [roundId], references: [id], onDelete: SetNull)
+  title           String
+  mode            String              @default("STANDARD") // QUICK | STANDARD | DEEP
+  status          String              @default("ready") // ready | generating | failed
+  generator       String              @default("deterministic") // deterministic | llm | agent
+  model           String?
   contextSnapshot Json
-  contextHash    String
+  contextHash     String
   /// expectations, competencies, topic checklist, schedule, readiness, risks, finalNotes, questionsToAsk
-  overview       Json
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
-  lessons        PreparationModule[]
-  sessions       PracticeSession[]
-  tasks          AgentTask[]
+  overview        Json
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  lessons         PreparationModule[]
+  sessions        PracticeSession[]
+  tasks           AgentTask[]
 }
 
 model PreparationModule {
-  id                 String            @id @default(cuid())
-  courseId           String
-  course             PreparationCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  key                String // stable slug: regeneration merges by key
-  order              Int
-  kind               String // concept | coding | system_design | behavioral | flashcards | mock | revision | recruiter
-  title              String
-  objectives         String[]
-  estimatedMinutes   Int
-  explanation        String
-  examples           String?
+  id                  String            @id @default(cuid())
+  courseId            String
+  course              PreparationCourse @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  key                 String // stable slug: regeneration merges by key
+  order               Int
+  kind                String // concept | coding | system_design | behavioral | flashcards | mock | revision | recruiter
+  title               String
+  objectives          String[]
+  estimatedMinutes    Int
+  explanation         String
+  examples            String?
   /// [{prompt, modelAnswer?, followUps?: string[], source}]
-  questions          Json              @default("[]")
-  evaluationCriteria String[]
-  commonMistakes     String[]
+  questions           Json              @default("[]")
+  evaluationCriteria  String[]
+  commonMistakes      String[]
   linkedOccurrenceIds String[]
-  scheduledDay       Int? // day index in schedule (0 = first study day)
-  status             String            @default("not_started") // not_started | in_progress | completed
-  revisionStatus     String            @default("none") // none | due | done
-  completedAt        DateTime?
-  version            Int               @default(1)
-  generator          String            @default("deterministic")
-  updatedAt          DateTime          @updatedAt
+  scheduledDay        Int? // day index in schedule (0 = first study day)
+  status              String            @default("not_started") // not_started | in_progress | completed
+  revisionStatus      String            @default("none") // none | due | done
+  completedAt         DateTime?
+  version             Int               @default(1)
+  generator           String            @default("deterministic")
+  updatedAt           DateTime          @updatedAt
 
   attempts AnswerAttempt[]
 
@@ -485,22 +491,22 @@ model PreparationModule {
 }
 
 model PracticeSession {
-  id          String             @id @default(cuid())
-  workspaceId String
-  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  courseId    String?
-  course      PreparationCourse? @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  roundId     String?
-  kind        String             @default("mock") // mock | practice | revision
-  roundType   String?
-  title       String
-  learningMode Boolean           @default(false)
+  id           String             @id @default(cuid())
+  workspaceId  String
+  workspace    Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  courseId     String?
+  course       PreparationCourse? @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  roundId      String?
+  kind         String             @default("mock") // mock | practice | revision
+  roundType    String?
+  title        String
+  learningMode Boolean            @default(false)
   /// snapshot: [{prompt, modelAnswer?, occurrenceId?, canonicalQuestionId?, source}]
-  questions   Json
-  status      String             @default("in_progress") // in_progress | completed
-  createdAt   DateTime           @default(now())
-  completedAt DateTime?
-  attempts    AnswerAttempt[]
+  questions    Json
+  status       String             @default("in_progress") // in_progress | completed
+  createdAt    DateTime           @default(now())
+  completedAt  DateTime?
+  attempts     AnswerAttempt[]
 }
 
 model AnswerAttempt {
@@ -684,4 +690,194 @@ model LLMConfiguration {
   lastTestError             String?
   lastSuccessAt             DateTime?
   updatedAt                 DateTime  @updatedAt
+}
+
+// ───────────────────────── Auto Apply (separate section) ─────────────────────────
+// Discovered jobs live here, NOT in Application. A lead reaches the tracker only via an explicit "Move to tracker".
+
+enum JobSourceType {
+  GREENHOUSE
+  LEVER
+  ASHBY
+  SMARTRECRUITERS
+  WORKABLE
+  ALERT_EMAIL
+  MANUAL_URL
+}
+
+model JobSource {
+  id             String        @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  type           JobSourceType
+  name           String
+  /// adapter config, e.g. { "board": "acme" }
+  config         Json          @default("{}")
+  enabled        Boolean       @default(true)
+  lastRunAt      DateTime?
+  lastSuccessAt  DateTime?
+  lastError      String?
+  lastFoundCount Int           @default(0)
+  /// lease that prevents overlapping discovery runs for the same source
+  leaseUntil     DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  leads          JobLead[]
+
+  @@unique([workspaceId, type, name])
+}
+
+enum JobLeadStatus {
+  DISCOVERED
+  EVALUATED
+  SHORTLISTED
+  READY_FOR_REVIEW
+  APPROVED
+  APPLYING
+  SUBMITTED
+  INTERVIEW
+  REJECTED
+  WITHDRAWN
+  NEEDS_ATTENTION
+  SKIPPED
+}
+
+model JobLead {
+  id                   String             @id @default(cuid())
+  workspaceId          String
+  workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sourceId             String?
+  source               JobSource?         @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  sourceType           JobSourceType
+  externalId           String?
+  canonicalUrl         String
+  applyUrl             String?
+  /// greenhouse | lever | ashby | smartrecruiters | workable | linkedin | bayt | gulftalent | naukrigulf | other
+  atsType              String             @default("other")
+  /// e.g. { board, jobId } to fetch application questions
+  atsMeta              Json?
+  title                String
+  company              String
+  location             String?
+  remote               Boolean?
+  employmentType       String?
+  salaryMin            Int?
+  salaryMax            Int?
+  salaryCurrency       String?
+  /// year | month | hour
+  salaryPeriod         String?
+  publishedAt          DateTime?
+  description          String             @default("")
+  /// same normalisation as Application.dedupeKey (company|title) so internal history can be cross-checked
+  dedupeKey            String
+  status               JobLeadStatus      @default(DISCOVERED)
+  statusReason         String?
+  fitScore             Int?
+  /// { skills, seniority, title, location, salary, recency } each 0-100 with reasons
+  fitBreakdown         Json?
+  fitExplanation       String?
+  blockers             String[]
+  /// optional LLM semantic review
+  aiFit                Json?
+  resumeId             String?
+  resume               ResumeDocument?    @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  /// { coverNote, answers: [{ key, label, required, answer, source, needsReview, sensitive }] }
+  applyKit             Json?
+  /// none | complete | incomplete
+  kitStatus            String             @default("none")
+  autoApproved         Boolean            @default(false)
+  discoveredVia        String[]
+  discoveredAt         DateTime           @default(now())
+  lastSeenAt           DateTime           @default(now())
+  seenCount            Int                @default(1)
+  trackerApplicationId String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  attempts             ApplyAttempt[]
+  recruiters           RecruiterContact[]
+
+  @@unique([workspaceId, dedupeKey])
+  @@index([workspaceId, status])
+  @@index([workspaceId, fitScore])
+}
+
+enum ApplyMethod {
+  MANUAL
+  PREFILL
+  AUTO
+  AGENT
+}
+
+enum ApplyAttemptStatus {
+  RUNNING
+  SUBMIT_CLICKED
+  SUBMITTED
+  BLOCKED
+  NEEDS_ATTENTION
+  FAILED
+  CANCELLED
+}
+
+model ApplyAttempt {
+  id              String             @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  leadId          String
+  lead            JobLead            @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  attemptNo       Int
+  method          ApplyMethod
+  status          ApplyAttemptStatus @default(RUNNING)
+  runner          String?
+  leaseUntil      DateTime?
+  /// { confirmationUrl, confirmationText, screenshot } — required before a lead is marked SUBMITTED
+  evidence        Json?
+  filledFields    Json?
+  missingFields   String[]
+  error           String?
+  startedAt       DateTime           @default(now())
+  submitClickedAt DateTime?
+  finishedAt      DateTime?
+
+  @@unique([leadId, attemptNo])
+  @@index([workspaceId, status])
+}
+
+model RecruiterContact {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  leadId          String?
+  lead            JobLead?  @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  name            String?
+  email           String?
+  phone           String?
+  company         String?
+  title           String?
+  linkedinUrl     String?
+  /// job_post | alert_email | manual
+  source          String    @default("manual")
+  notes           String?
+  lastContactedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([workspaceId, email])
+  @@index([workspaceId, company])
+}
+
+model AutoApplyConfig {
+  id                String    @id @default(cuid())
+  workspaceId       String    @unique
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /// { titles, locations, keywords, excludeKeywords, minSalary, salaryCurrency, salaryPeriod, remoteOk }
+  preferences       Json      @default("{}")
+  /// explicit decisions used to answer forms: contact details, work authorisation, consents, demographics …
+  standingAnswers   Json      @default("{}")
+  autoSubmit        Boolean   @default(false)
+  minShortlistScore Int       @default(60)
+  minAutoApplyScore Int       @default(75)
+  dailyApplyCap     Int       @default(10)
+  allowAiFreeText   Boolean   @default(true)
+  discoveryHours    Int       @default(12)
+  updatedAt         DateTime  @updatedAt
 }

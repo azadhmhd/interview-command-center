@@ -49,6 +49,8 @@
     "test:e2e": "pnpm --filter api test:e2e",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down",
-    "screenshots": "node apps/web/scripts/screenshots.mjs"
+    "screenshots": "node apps/web/scripts/screenshots.mjs",
+    "apply:runner": "pnpm --filter apply-runner start",
+    "test:runner": "pnpm --filter apply-runner test"
   }
 }

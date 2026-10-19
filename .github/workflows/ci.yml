@@ -44,6 +44,8 @@ jobs:
           pnpm --filter web exec playwright install --with-deps chromium
           (cd apps/web && pnpm start &) && npx wait-on http://localhost:3000/login http://localhost:4000/api/health
           pnpm --filter web test:e2e
+      - name: Auto Apply runner tests (local mock forms)
+        run: pnpm --filter apply-runner test
 
   docker:
     runs-on: ubuntu-latest

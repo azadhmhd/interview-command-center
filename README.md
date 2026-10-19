@@ -46,6 +46,12 @@ every interview into better preparation for the next one:
   interviews and readiness tracking.
 - **Practice & evaluation:** rubric scoring (correctness, completeness, depth, clarity). Model answers stay hidden until
   you attempt. Retry and compare with previous attempts.
+- **Auto Apply:** a separate section that discovers jobs on company boards (Greenhouse, Lever, Ashby, SmartRecruiters,
+  Workable) and from pasted LinkedIn/Bayt/GulfTalent/Naukrigulf alert emails. It scores each job with reasons and
+  hard blockers, prepares an apply kit from your saved answers, and applies through a local browser runner or Claude
+  in Chrome. You can approve each job or turn on auto-submit within guardrails (stops on CAPTCHA and logins, never
+  guesses answers, never applies twice, requires proof). Recruiter contacts are saved for later outreach.
+  [Details](docs/AUTO_APPLY.md)
 - **Bring your own AI:** one OpenAI-compatible client (Ollama, vLLM, LM Studio, hosted providers) **or** your
   existing Claude Code / Cursor subscription through agent task packages and a reusable skill pack.
 - **Automatic preparation schedule:** milestones at 3, 2 and 1 days before the interview and on interview day,
@@ -230,6 +236,7 @@ pnpm lint          # strict TypeScript, both apps
 pnpm test:unit     # state machine, routing, planner, SM-2, scheduling, SSRF guard
 pnpm test:e2e      # API acceptance suite (needs `pnpm infra:up`): fake OpenAI-compatible server, stub Claude CLI, two-user isolation
 pnpm test:ui       # Playwright core flow against a running stack
+pnpm test:runner   # Auto Apply runner against local mock application forms
 ```
 
 See [docs/TESTING.md](docs/TESTING.md).
@@ -241,6 +248,7 @@ See [docs/TESTING.md](docs/TESTING.md).
 | Architecture & decisions | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Setup, deployment & operations | [docs/SETUP.md](docs/SETUP.md) |
 | LLM configuration & troubleshooting | [docs/AI_CONFIG.md](docs/AI_CONFIG.md) |
+| Auto Apply: sources, matching, guardrails, runner | [docs/AUTO_APPLY.md](docs/AUTO_APPLY.md) |
 | Coding agents, task states & skill pack | [docs/AGENTS.md](docs/AGENTS.md) |
 | API overview (live OpenAPI at `/api/docs`) | [docs/API.md](docs/API.md) |
 | Security design | [docs/SECURITY.md](docs/SECURITY.md) |
@@ -256,6 +264,7 @@ apps/
   api/              NestJS API + worker: auth, workspaces, applications, rounds, knowledge base,
                     courses, practice, LLM client, task queue, scheduler, agent adapters (Prisma schema in prisma/)
   web/              Next.js UI (src/app routes, src/components, e2e/ Playwright tests, scripts/screenshots.mjs)
+  apply-runner/     Local Auto Apply runner: fills approved applications in an isolated Playwright browser profile
 skills/             Agent skill pack sources, generated JSON Schemas, templates, installer
 agent-workspace/    Folder you open in Claude Code / Cursor; task packages land in tasks/
 docs/               Documentation and screenshots

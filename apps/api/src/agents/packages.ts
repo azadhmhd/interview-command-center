@@ -1,10 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { AgentTask } from '@prisma/client';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { config } from '../config';
+import { PrismaService } from '../prisma.service';
 import { TaskDefinitions } from '../tasks/definitions';
 import { OUTPUT_SCHEMAS, TASK_SKILLS, TaskType } from '../tasks/schemas';
 
@@ -18,7 +19,7 @@ const MAX_OUTPUT_BYTES = 5 * 1024 * 1024;
 @Injectable()
 export class AgentPackages {
   private log = new Logger('Agents');
-  constructor(private defs: TaskDefinitions) {}
+  constructor(private defs: TaskDefinitions, private prisma: PrismaService) {}
 
   /** Path for a task's package, validated against traversal. */
   dir(taskId: string) {
@@ -62,6 +63,7 @@ export class AgentPackages {
     await mkdir(join(dir, 'output'), { recursive: true });
     await writeFile(join(dir, 'task.json'), JSON.stringify(pkg, null, 2));
     await writeFile(join(dir, 'output-schema.json'), JSON.stringify(pkg.outputSchema, null, 2));
+    if (task.type === 'job_application') await this.attachCv(task, dir, (pkg.context as { cvFile?: string | null }).cvFile);
     await writeFile(join(dir, 'TASK.md'), [
       `# ${pkg.title}`, '',
       `- Task ID: \`${pkg.taskId}\``, `- Type: \`${pkg.type}\``, `- Skill: \`${pkg.skill}\``, '',
@@ -71,6 +73,15 @@ export class AgentPackages {
       '## Output', `Write \`${OUTPUT_FILE}\`. Then, in the app, open the task and click **Sync output** (or upload the file).`, '',
     ].join('\n'));
     return { dir, package: pkg };
+  }
+
+  /** Copy the lead's selected CV into the package (the only file an apply agent needs to upload). */
+  private async attachCv(task: AgentTask, dir: string, name?: string | null) {
+    if (!name) return;
+    const { leadId } = task.inputSnapshot as { leadId: string };
+    const lead = await this.prisma.jobLead.findFirst({ where: { id: leadId, workspaceId: task.workspaceId }, include: { resume: true } });
+    const src = lead?.resume?.storagePath && resolve(lead.resume.storagePath);
+    if (src && src.startsWith(resolve(config.uploadDir) + sep)) await copyFile(src, join(dir, name));
   }
 
   async readOutput(taskId: string): Promise<unknown> {

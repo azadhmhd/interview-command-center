@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL || 'postgresql://icc:icc@localhost:5434/icc_test';
 process.env.THROTTLE_AUTH_LIMIT = '10000';
+process.env.AUTOAPPLY_ALLOW_CUSTOM_BASE_URL = 'true'; // fake job-board server in tests only
 process.env.REDIS_URL = (process.env.REDIS_URL || 'redis://localhost:6380').replace(/\/\d*$/, '') + '/1'; // separate queue DB from dev
 process.env.LLM_ENABLED = 'false';
 process.env.LLM_BASE_URL = '';
