@@ -46,8 +46,9 @@ every interview into better preparation for the next one:
   interviews and readiness tracking.
 - **Practice & evaluation:** rubric scoring (correctness, completeness, depth, clarity). Model answers stay hidden until
   you attempt. Retry and compare with previous attempts.
-- **Auto Apply:** a separate section that discovers jobs on company boards (Greenhouse, Lever, Ashby, SmartRecruiters,
-  Workable) and from pasted LinkedIn/Bayt/GulfTalent/Naukrigulf alert emails. It scores each job with reasons and
+- **Auto Apply:** a separate section that finds jobs by your role and location through Google Jobs (SerpApi) and
+  Jooble, covering LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf and company pages, plus company boards you watch
+  (Greenhouse, Lever, Ashby, SmartRecruiters, Workable) and pasted alert emails. You choose which sites to apply through. It scores each job with reasons and
   hard blockers, prepares an apply kit from your saved answers, and applies through a local browser runner or Claude
   in Chrome. You can approve each job or turn on auto-submit within guardrails (stops on CAPTCHA and logins, never
   guesses answers, never applies twice, requires proof). Recruiter contacts are saved for later outreach.

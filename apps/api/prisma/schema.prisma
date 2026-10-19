@@ -696,6 +696,10 @@ model LLMConfiguration {
 // Discovered jobs live here, NOT in Application. A lead reaches the tracker only via an explicit "Move to tracker".
 
 enum JobSourceType {
+  /// role + location search providers (aggregate LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf, company pages)
+  GOOGLE_JOBS
+  JOOBLE
+  /// watched company boards
   GREENHOUSE
   LEVER
   ASHBY

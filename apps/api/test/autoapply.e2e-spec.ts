@@ -21,6 +21,12 @@ async function fakeBoards() {
     { label: 'What are your salary expectations?', required: true, fields: [{ name: 'question_1', type: 'input_text' }] },
   ] };
   let lever = [{ id: 'dup', text: 'Senior Backend Engineer', categories: { location: 'Dubai' }, descriptionPlain: 'Python', hostedUrl: 'https://jobs.example/beta/dup', applyUrl: 'https://jobs.example/beta/dup/apply' }];
+  const searches: string[] = [];
+  const serp = { jobs_results: [
+    { job_id: 's1', title: 'Platform Backend Engineer', company_name: 'Zeta', location: 'Dubai - United Arab Emirates', description: 'Python, Django, PostgreSQL and Redis.', detected_extensions: { posted_at: '1 day ago' },
+      apply_options: [{ title: 'LinkedIn', link: 'https://www.linkedin.com/jobs/view/555' }, { title: 'Zeta Careers', link: 'https://careers.zeta.example/jobs/1' }] },
+    { job_id: 's2', title: 'Backend Engineer (Bayt only)', company_name: 'Eta', location: 'Dubai', description: 'Python', apply_options: [{ title: 'Bayt', link: 'https://www.bayt.com/en/uae/jobs/x-1/' }] },
+  ] };
   const server: Server = createServer((req, res) => {
     const send = (code: number, body: unknown) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     const url = req.url ?? '';
@@ -28,11 +34,12 @@ async function fakeBoards() {
     if (/^\/v1\/boards\/acme\/jobs\/\d+\?questions=true/.test(url)) return send(200, questions);
     if (url.startsWith('/v1/boards/acme/jobs')) return send(200, { jobs });
     if (url.startsWith('/v0/postings/beta')) return send(200, lever);
+    if (url.startsWith('/search.json')) { searches.push(url); return send(200, serp); }
     send(404, {});
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   const port = (server.address() as { port: number }).port;
-  return { url: `http://127.0.0.1:${port}`, setLever: (l: typeof lever) => { lever = l; }, close: () => new Promise<void>((r) => server.close(() => r())) };
+  return { url: `http://127.0.0.1:${port}`, searches, setLever: (l: typeof lever) => { lever = l; }, close: () => new Promise<void>((r) => server.close(() => r())) };
 }
 
 describe('Auto Apply (separate section)', () => {
@@ -225,5 +232,35 @@ describe('Auto Apply (separate section)', () => {
     expect((await u.get('/autoapply/runner-tokens')).body.map((x: { label: string }) => x.label)).toContain('macbook');
     await u.del(`/autoapply/runner-tokens/${t.id}`).expect(200);
     await u.raw().post('/api/autoapply/runner/claim').set(auth).send({ runner: 'mac' }).expect(401);
+  });
+  it('finds jobs by role through a search provider, keeps the key secret and respects the budget', async () => {
+    await u.put('/autoapply/config', { preferences: { ...(await u.get('/autoapply/presets')).body['UAE · Backend & AI'], sites: ['linkedin', 'company'] } }).expect(200);
+    const saved = await u.put('/autoapply/providers/GOOGLE_JOBS', { apiKey: 'serp-secret-9876', baseUrl: boards.url, monthlyBudget: 3 }).expect(200);
+    expect(saved.body).toMatchObject({ hasKey: true, apiKeyLast4: '9876', enabled: true, usedThisMonth: 0 });
+    const row = await prisma.jobSource.findFirstOrThrow({ where: { id: saved.body.id } });
+    expect(JSON.stringify(row.config)).not.toContain('serp-secret');
+    for (const path of ['/autoapply/sources', '/autoapply/overview', '/autoapply/providers']) expect(JSON.stringify((await u.get(path)).body)).not.toMatch(/serp-secret|apiKeyEnc/);
+
+    const run = await u.post(`/autoapply/sources/${saved.body.id}/run`).expect(200);
+    expect(run.body.created).toBe(1); // the Bayt-only listing is outside the allowed sites
+    expect(boards.searches).toHaveLength(3); // capped by the monthly budget
+    expect(boards.searches[0]).toMatch(/engine=google_jobs/);
+    expect(boards.searches[0]).toMatch(/q=Senior\+Backend\+Engineer\+Dubai/);
+    expect(boards.searches[0]).toMatch(/gl=ae/);
+    const lead = await leadBy('Platform Backend Engineer');
+    expect(lead).toMatchObject({ company: 'Zeta', sourceType: 'GOOGLE_JOBS', atsType: 'other' });
+    const detail = (await u.get(`/autoapply/leads/${lead.id}`)).body;
+    expect(detail.applyUrl).toBe('https://careers.zeta.example/jobs/1'); // company page preferred over LinkedIn
+    expect(detail.discoveredVia).toEqual(['Google Jobs · Company careers page']);
+
+    expect((await u.get('/autoapply/providers')).body.find((p: { type: string }) => p.type === 'GOOGLE_JOBS').usedThisMonth).toBe(3);
+    await prisma.jobSource.update({ where: { id: saved.body.id }, data: { leaseUntil: null } });
+    expect((await u.post(`/autoapply/sources/${saved.body.id}/run`).expect(200)).body.error).toMatch(/Monthly budget of 3/);
+    expect(boards.searches).toHaveLength(3);
+
+    // other workspaces see nothing of it; board config cannot overwrite the encrypted key
+    expect((await other.get('/autoapply/providers')).body.every((p: { hasKey: boolean }) => !p.hasKey)).toBe(true);
+    await u.patch(`/autoapply/sources/${saved.body.id}`, { config: { board: 'x' } }).expect(404);
+    await u.put('/autoapply/providers/NOPE', {}).expect(404);
   });
 });

@@ -11,7 +11,7 @@ import { relTime } from '@/lib/utils';
 
 interface Overview {
   byStatus: Record<string, number>; submittedToday: number; autoSubmit: boolean; dailyApplyCap: number; minAutoApplyScore: number;
-  sources: { id: string; name: string; type: string; enabled: boolean; lastSuccessAt?: string; lastError?: string; lastRunAt?: string }[];
+  sources: { id: string; name: string; type: string; enabled: boolean; lastSuccessAt?: string; lastError?: string; lastRunAt?: string; config: { hasKey?: boolean } }[];
   needsAttention: { id: string; title: string; company: string; statusReason?: string }[];
 }
 
@@ -32,7 +32,7 @@ export default function Discover() {
   const reload = () => refresh('/autoapply');
 
   const scanAll = async () => {
-    for (const s of ov?.sources.filter((x) => x.enabled && !['ALERT_EMAIL', 'MANUAL_URL'].includes(x.type)) ?? []) {
+    for (const s of ov?.sources.filter((x) => x.enabled && !['ALERT_EMAIL', 'MANUAL_URL'].includes(x.type) && x.config.hasKey !== false) ?? []) {
       await run(`scan-${s.id}`, () => api(`/autoapply/sources/${s.id}/run`, { method: 'POST' }));
     }
     reload();
@@ -40,11 +40,11 @@ export default function Discover() {
 
   return (
     <div>
-      <PageHeader title="Discover jobs" description="Jobs found on company boards, alert emails and links you paste, ranked by an explained fit score."
+      <PageHeader title="Discover jobs" description="Jobs found by searching your target roles (plus watched company boards, alert emails and links you paste), ranked by an explained fit score."
         actions={<>
           <Button variant="outline" onClick={() => setUrlOpen(true)}><Link2 className="h-4 w-4" />Paste job URL</Button>
           <Button variant="outline" onClick={() => setAlertOpen(true)}><ClipboardPaste className="h-4 w-4" />Paste alert email</Button>
-          <Button onClick={scanAll} loading={!!busy?.startsWith('scan')} disabled={!ov?.sources.length}><RefreshCw className="h-4 w-4" />Scan sources</Button>
+          <Button onClick={scanAll} loading={!!busy?.startsWith('scan')} disabled={!ov?.sources.length}><RefreshCw className="h-4 w-4" />Search now</Button>
         </>} />
       <AutoApplyNav />
       {ov && (
@@ -70,8 +70,8 @@ export default function Discover() {
       </Card>
       <ErrorBox error={error} />
       {isLoading && !leads ? <Loading /> : !leads?.length ? (
-        <Card><EmptyState icon={<Radar className="h-6 w-6" />} title="No jobs yet" description="Add company boards under Job sources, paste a job link, or paste a LinkedIn / Bayt / GulfTalent / Naukrigulf job-alert email."
-          action={<Link className="text-sm text-accent underline" href="/auto-apply/sources">Add a job source</Link>} /></Card>
+        <Card><EmptyState icon={<Radar className="h-6 w-6" />} title="No jobs yet" description="Add a Google Jobs or Jooble key and your target titles, and jobs matching your role arrive automatically. You can also paste a job link or a LinkedIn / Indeed / Bayt job-alert email."
+          action={<Link className="text-sm text-accent underline" href="/auto-apply/settings">Set up role search</Link>} /></Card>
       ) : (
         <Card className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">

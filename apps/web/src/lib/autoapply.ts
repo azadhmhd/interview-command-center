@@ -30,4 +30,4 @@ export const salary = (l: Pick<LeadRow, 'salaryMin' | 'salaryMax' | 'salaryCurre
   l.salaryMin || l.salaryMax ? `${l.salaryCurrency ?? ''} ${[l.salaryMin, l.salaryMax].filter(Boolean).map((v) => v!.toLocaleString()).join('–')}${l.salaryPeriod ? ` / ${l.salaryPeriod}` : ''}`.trim() : null;
 
 export const scoreTone = (s?: number | null): Tone => (s == null ? 'neutral' : s >= 75 ? 'success' : s >= 60 ? 'info' : s >= 45 ? 'warning' : 'neutral');
-export const ATS_LABEL: Record<string, string> = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', smartrecruiters: 'SmartRecruiters', workable: 'Workable', linkedin: 'LinkedIn', bayt: 'Bayt', gulftalent: 'GulfTalent', naukrigulf: 'Naukrigulf', other: 'Web' };
+export const ATS_LABEL: Record<string, string> = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', smartrecruiters: 'SmartRecruiters', workable: 'Workable', linkedin: 'LinkedIn', indeed: 'Indeed', bayt: 'Bayt', gulftalent: 'GulfTalent', naukrigulf: 'Naukrigulf', other: 'Web' };

@@ -1,12 +1,13 @@
 'use client';
 import { Play, Rocket, Trash2 } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { AutoApplyNav } from '@/components/auto-apply-bits';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorBox, Field, Input, Loading, PageHeader, Select, useAction } from '@/components/ui';
 import { api, refresh, useApi } from '@/lib/api';
 import { fmtDate, relTime } from '@/lib/utils';
 
-interface Source { id: string; type: string; name: string; config: { board: string; company?: string }; enabled: boolean; lastRunAt?: string; lastSuccessAt?: string; lastError?: string; lastFoundCount: number; _count: { leads: number } }
+interface Source { id: string; type: string; name: string; config: { board?: string; company?: string; hasKey?: boolean }; enabled: boolean; lastRunAt?: string; lastSuccessAt?: string; lastError?: string; lastFoundCount: number; _count: { leads: number } }
 
 const TYPES = [
   { value: 'GREENHOUSE', label: 'Greenhouse', hint: 'board token from job-boards.greenhouse.io/<board>' },
@@ -15,6 +16,7 @@ const TYPES = [
   { value: 'SMARTRECRUITERS', label: 'SmartRecruiters', hint: 'company id from jobs.smartrecruiters.com/<Company>' },
   { value: 'WORKABLE', label: 'Workable', hint: 'account from apply.workable.com/<account>' },
 ];
+const SEARCH = ['GOOGLE_JOBS', 'JOOBLE'];
 
 export default function Sources() {
   const { data, error, isLoading, mutate } = useApi<Source[]>('/autoapply/sources');
@@ -24,10 +26,14 @@ export default function Sources() {
   const hint = TYPES.find((t) => t.value === f.type)?.hint;
   return (
     <div className="space-y-4">
-      <PageHeader title="Job sources" description="Company career boards read through their official public job-board APIs. Scanned automatically by the worker." />
+      <PageHeader title="Job sources" description="Role searches and watched company boards. The worker runs them on schedule and queues the matches automatically." />
       <AutoApplyNav />
+      <Card className="p-4 text-sm">
+        <p><strong>Jobs are found by role.</strong> Google Jobs and Jooble search your target titles in your locations across LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf and company pages. Set keys, sites and locations in <Link className="underline" href="/auto-apply/settings">Settings → Where to search</Link>.</p>
+        <p className="mt-1 text-xs text-muted">Company boards below are optional: add employers you want every opening from, even ones the search would miss.</p>
+      </Card>
       <Card>
-        <CardHeader title="Add a company board" description="Find the board name in the company's careers link. LinkedIn, Bayt, GulfTalent and Naukrigulf are not crawled (their rules forbid it): paste their alert emails on Discover instead." />
+        <CardHeader title="Watch a company board" description="Find the board name in the company's careers link." />
         <form className="grid gap-3 p-4 sm:grid-cols-[160px_1fr_1fr_1fr_auto] sm:items-end" onSubmit={async (e) => { e.preventDefault(); if (await run('add', () => api('/autoapply/sources', { body: { type: f.type, name: f.name || f.company || f.board, config: { board: f.board.trim(), ...(f.company && { company: f.company }) } } }), 'Source added')) { setF({ ...f, name: '', board: '', company: '' }); reload(); } }}>
           <Field label="Platform"><Select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}>{TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}</Select></Field>
           <Field label="Board / company slug" hint={hint}><Input required value={f.board} onChange={(e) => setF({ ...f, board: e.target.value })} placeholder="acme" /></Field>
@@ -43,8 +49,8 @@ export default function Sources() {
             {data.map((s) => (
               <li key={s.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{s.name} <Badge>{TYPES.find((t) => t.value === s.type)?.label ?? s.type}</Badge> {!s.enabled && <Badge>paused</Badge>}</p>
-                  <p className="text-xs text-muted">board “{s.config.board}” · {s._count.leads} jobs · last scan {s.lastRunAt ? relTime(s.lastRunAt) : 'never'}{s.lastSuccessAt && ` · last success ${fmtDate(s.lastSuccessAt, true)} (${s.lastFoundCount} open roles)`}</p>
+                  <p className="text-sm font-medium">{s.name} <Badge>{SEARCH.includes(s.type) ? 'role search' : TYPES.find((t) => t.value === s.type)?.label ?? s.type}</Badge> {!s.enabled && <Badge>paused</Badge>}</p>
+                  <p className="text-xs text-muted">{s.config.board ? `board “${s.config.board}”` : 'your titles × locations'} · {s._count.leads} jobs · last scan {s.lastRunAt ? relTime(s.lastRunAt) : 'never'}{s.lastSuccessAt && ` · last success ${fmtDate(s.lastSuccessAt, true)} (${s.lastFoundCount} open roles)`}</p>
                   {s.lastError && <p className="text-xs text-danger">Last error: {s.lastError}</p>}
                 </div>
                 <Button size="sm" variant="outline" loading={busy === s.id} onClick={async () => { const r = await run(s.id, () => api<{ found: number; created: number; error?: string }>(`/autoapply/sources/${s.id}/run`, { method: 'POST' })); if (r) { reload(); } }}><Play className="h-3.5 w-3.5" />Scan now</Button>
