@@ -7,6 +7,9 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **Auto Apply** section, kept separate from the application tracker:
+  - Role-based discovery: Google Jobs (SerpApi) and Jooble search your titles × locations on schedule, with a site
+    filter (LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf, company pages), best-apply-link choice, encrypted keys and a
+    monthly search budget. Indeed links are recognised in alert emails.
   - Job discovery from official Greenhouse, Lever, Ashby, SmartRecruiters and Workable APIs, plus pasted job-alert emails and job URLs.
   - Normalisation, cross-source dedupe and explainable fit scoring with hard eligibility blockers.
   - CV selection, and apply kits built only from your profile and saved standing answers.

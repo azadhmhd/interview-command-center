@@ -14,17 +14,43 @@ sources ──▶ normalise + dedupe ──▶ score + blockers ──▶ shortl
 
 | Table | Holds |
 |---|---|
-| `JobSource` | Company boards you add (type, board slug, last run / success / error, scan lease) |
+| `JobSource` | Search providers (encrypted API key, monthly budget, interval) and company boards you watch (board slug); last run / success / error, scan lease |
 | `JobLead` | One discovered job: normalised fields, `dedupeKey`, status, fit score + breakdown + explanation, blockers, selected CV, apply kit, discovery history |
 | `ApplyAttempt` | Every apply run: method (auto / prefill / agent / manual), status, evidence (confirmation text, URL, screenshot), missing fields |
 | `RecruiterContact` | Recruiters saved for later outreach (from job posts, alert emails, pasted text, manual) |
 | `AutoApplyConfig` | Preferences, standing answers, auto-submit guardrails, scan interval |
 
-Migration: `apps/api/prisma/migrations/20261019090000_auto_apply`. It adds tables, enums and relations only; existing
+Migrations: `apps/api/prisma/migrations/20261019090000_auto_apply` and `20261020090000_search_providers` (adds two enum values). It adds tables, enums and relations only; existing
 tables are unchanged. Reused from the app: auth & workspaces, the CV library, the LLM client, the task queue, the
 SSRF-safe page fetcher and the tracker's `company|title` dedupe key (so internal history is cross-checked).
 
-## Sources
+## Finding jobs by role
+
+You don't need to name companies or paste URLs. Search providers run **your target titles × your search locations**
+(Settings → Where to search) and everything they return goes through the same dedupe → score → kit → queue pipeline,
+on schedule, with no clicks.
+
+| Provider | What it covers | Cost | Verified |
+|---|---|---|---|
+| Google Jobs via [SerpApi](https://serpapi.com/google-jobs-api) | Google's job index: LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf, Glassdoor and company career pages. `gl` country code (default `ae`). | Free plan: 250 searches/month | ⚠️ against SerpApi's documented response in tests; not yet run with a real key |
+| [Jooble](https://jooble.org/api/about) | Jooble's own aggregated index | Free key on request | ⚠️ request/response shape taken from Jooble's client examples; unverified until you add a key |
+
+- **Queries:** one per title per search location (titles from settings plus your profile's target roles), capped by
+  *Max searches per run* (default 6).
+- **Budget:** each provider counts searches per calendar month and stops at its budget (SerpApi default 250, Jooble 500).
+  A search counts before it is sent, because providers bill failed searches too. A rejected key stops the run immediately.
+- **Schedule:** each provider runs every `everyHours` (default 24). 6 searches a day stays within SerpApi's free 250.
+- **Sites:** you choose which sites you are willing to apply through (LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf,
+  company career pages, other boards). Per job, the best allowed link wins: a form the runner supports
+  (Greenhouse/Lever/Ashby) → the company careers page → the big boards → other aggregators. Jobs with no allowed link
+  are dropped. When the same job turns up again with a better link (e.g. its Greenhouse page after LinkedIn), the lead
+  switches to it.
+- **Keys** are encrypted with `APP_ENCRYPTION_KEY` (AES-256-GCM) and never returned by the API; the UI shows the last 4 characters.
+- **LinkedIn and Indeed** have no public job-search API (Indeed's Publisher API is closed to new users) and forbid
+  crawling. Their listings arrive through Google Jobs, or paste their alert emails (`linkedin.com/jobs/view/…`,
+  `indeed.com/viewjob?jk=…` and `rc/clk?jk=…` links are recognised).
+
+## Watched company boards and other sources
 
 | Source | Access | Verified |
 |---|---|---|
@@ -38,7 +64,8 @@ SSRF-safe page fetcher and the tracker's `company|title` dedupe key (so internal
 | LinkedIn / Bayt / GulfTalent / Naukrigulf search | **Not crawled** | LinkedIn's robots.txt disallows all crawling and its terms forbid bots/automated applying; Bayt and GulfTalent block automation and need logins; Naukrigulf did not respond. Use their alert emails or pasted links. |
 
 Each scan takes a lease on its source, so scans never overlap. Failures are recorded on the source (`lastError`) without
-affecting other sources. The worker scans every `discoveryHours` (default 12).
+affecting other sources. The worker scans company boards every `discoveryHours` (default 12) and search providers on
+their own interval.
 
 ## Matching (explainable, deterministic)
 
@@ -125,9 +152,11 @@ Nothing is ever emailed from the app.
 
 ## Testing
 
-- Unit (`src/autoapply/autoapply.spec.ts`, 17 tests): normalisation for all five sources, alert parsing, URL
+- Unit (`src/autoapply/autoapply.spec.ts`, 25 tests): Google Jobs and Jooble normalisation, site filter and
+  best-link choice, salary/date parsing, query building, Indeed links, normalisation for all five boards, alert parsing, URL
   canonicalisation, dedupe, scoring, blockers, false technology matches, CV selection, kit rules, transitions, evidence.
-- API e2e (`test/autoapply.e2e-spec.ts`, 9 tests, fake board server):
+- API e2e (`test/autoapply.e2e-spec.ts`, 10 tests, fake board + SerpApi server):
+  - role search: key encrypted and never returned, site filter, company page preferred, monthly budget
   - discovery, dedupe and source failures
   - scan overlap
   - approval enforcement and single claim
@@ -154,6 +183,8 @@ No test ever contacts a real job site or submits a real application.
   widgets, multi-step Workday-style flows, reCAPTCHA on submit. Those end up in Needs attention rather than being guessed.
 - **LinkedIn Easy Apply and other board logins are not automated.**
 - **No inbox access.** Alert emails are pasted, and recruiter replies are not detected automatically.
+- **Search providers** have not been run with real keys yet; SerpApi's coverage depends on what Google indexes for
+  your country, and Jooble returns short snippets (the full description is read when you open or fetch the job).
 - **Workable** adapter: endpoint verified, listings mapping untested against a live account with open roles.
 - **Cover notes and open-ended answers** are template- or AI-drafted from your profile; tailored CV generation is
   deliberately not done.

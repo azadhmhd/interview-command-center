@@ -1,5 +1,6 @@
 import { JobLeadStatus } from '@prisma/client';
 import { z } from 'zod';
+import { SITES } from './search';
 
 /** Allowed lead transitions. SUBMITTED is only reachable with verified evidence (enforced in the service). */
 const T: Record<JobLeadStatus, JobLeadStatus[]> = {
@@ -36,6 +37,11 @@ export const preferencesSchema = z.object({
   salaryPeriod: z.enum(['year', 'month']).optional(),
   remoteOk: z.boolean().default(true),
   maxAgeDays: z.number().int().min(1).max(365).default(45),
+  // where the search providers look: role × search location queries, country, and which sites you accept
+  searchLocations: z.array(z.string().max(100)).max(10).default([]),
+  searchCountry: z.string().regex(/^[a-z]{2}$/).default('ae'),
+  sites: z.array(z.enum(SITES)).default([...SITES]),
+  maxSearchQueries: z.number().int().min(1).max(30).default(6),
 });
 
 /** Example preset offered in the UI; users edit everything. */
@@ -45,5 +51,6 @@ export const PRESETS: Record<string, z.infer<typeof preferencesSchema>> = {
     locations: ['Dubai', 'Abu Dhabi', 'United Arab Emirates', 'UAE', 'Sharjah'],
     keywords: ['Python', 'Django', 'FastAPI', 'Go', 'PostgreSQL', 'Redis', 'RAG', 'LLM'],
     excludeKeywords: [], languages: ['English'], minSalary: 18500, salaryCurrency: 'AED', salaryPeriod: 'month', remoteOk: true, maxAgeDays: 45,
+    searchLocations: ['Dubai', 'Abu Dhabi'], searchCountry: 'ae', sites: ['linkedin', 'indeed', 'bayt', 'gulftalent', 'naukrigulf', 'company', 'other'], maxSearchQueries: 6,
   },
 };

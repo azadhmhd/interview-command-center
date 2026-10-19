@@ -198,7 +198,7 @@ export function classifyUrl(raw: string): { atsType: string; atsMeta?: Record<st
   if (h === 'jobs.ashbyhq.com' && p.length >= 2) return { atsType: 'ashby', atsMeta: { board: p[0], jobId: p[1] } };
   if (onDomain(h, 'smartrecruiters.com')) return { atsType: 'smartrecruiters' };
   if (onDomain(h, 'workable.com')) return { atsType: 'workable' };
-  for (const [d, t] of [['linkedin.com', 'linkedin'], ['bayt.com', 'bayt'], ['gulftalent.com', 'gulftalent'], ['naukrigulf.com', 'naukrigulf']] as const) {
+  for (const [d, t] of [['linkedin.com', 'linkedin'], ['indeed.com', 'indeed'], ['bayt.com', 'bayt'], ['gulftalent.com', 'gulftalent'], ['naukrigulf.com', 'naukrigulf']] as const) {
     if (onDomain(h, d)) return { atsType: t };
   }
   return { atsType: 'other' };
@@ -209,6 +209,8 @@ export function canonicalUrl(raw: string): string {
   const u = new URL(raw);
   const li = onDomain(u.hostname, 'linkedin.com') && u.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d+)/);
   if (li) return `https://www.linkedin.com/jobs/view/${li[1]}/`;
+  const jk = onDomain(u.hostname, 'indeed.com') && u.searchParams.get('jk');
+  if (jk) return `https://${u.hostname}/viewjob?jk=${encodeURIComponent(jk)}`;
   u.hash = '';
   for (const k of [...u.searchParams.keys()]) if (/^(utm_|trk|ref|refId|trackingId|src|source|gh_src|lever-source|ashby_)/i.test(k)) u.searchParams.delete(k);
   return u.toString();
@@ -229,6 +231,7 @@ export async function importFromUrl(raw: string): Promise<NormalizedJob> {
 
 const ALERT_LINKS: { re: RegExp; atsType: string }[] = [
   { re: /https?:\/\/(?:[\w-]+\.)?linkedin\.com\/(?:comm\/)?jobs\/view\/[^\s"'<>)]+/gi, atsType: 'linkedin' },
+  { re: /https?:\/\/(?:[\w-]+\.)?indeed\.com\/(?:viewjob|rc\/clk|pagead\/clk)\?[^\s"'<>)]*\bjk=[^\s"'<>)]+/gi, atsType: 'indeed' },
   { re: /https?:\/\/(?:www\.)?bayt\.com\/[^\s"'<>)]*\/jobs\/[^\s"'<>)]+/gi, atsType: 'bayt' },
   { re: /https?:\/\/(?:www\.)?gulftalent\.com\/[^\s"'<>)]*jobs?\/[^\s"'<>)]+/gi, atsType: 'gulftalent' },
   { re: /https?:\/\/(?:www\.)?naukrigulf\.com\/[^\s"'<>)]*-jid-[^\s"'<>)]+/gi, atsType: 'naukrigulf' },

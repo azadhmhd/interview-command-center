@@ -2,6 +2,7 @@ import { dedupeKey } from '../applications/applications';
 import { verifyEvidence } from './autoapply.service';
 import { buildKit, standingAnswersSchema } from './kit';
 import { DEFAULT_PREFERENCES, scoreJob, selectResume } from './matching';
+import { bestApplyOption, buildQueries, parsePostedAt, parseSalary, SEARCH, siteOf, SITES } from './search';
 import { ADAPTERS, canonicalUrl, classifyUrl, parseAlertEmail } from './sources';
 import { canMove, PRESETS } from './state';
 
@@ -51,7 +52,61 @@ describe('source adapters normalise to one shape', () => {
   });
 });
 
+describe('role search providers', () => {
+  const now = new Date('2026-10-20T12:00:00Z');
+  it('classifies sites and picks the best allowed apply link', () => {
+    expect(siteOf('https://ae.linkedin.com/jobs/view/123')).toBe('linkedin');
+    expect(siteOf('https://ae.indeed.com/viewjob?jk=abc')).toBe('indeed');
+    expect(siteOf('https://www.glassdoor.com/job/1')).toBe('other');
+    expect(siteOf('https://careers.acme.com/jobs/1')).toBe('company');
+    expect(siteOf('https://evil-linkedin.com/x')).toBe('company'); // strict host match
+    const opts = [{ title: 'LinkedIn', link: 'https://www.linkedin.com/jobs/view/9' }, { title: 'Acme Careers', link: 'https://careers.acme.com/1' }, { title: 'Greenhouse', link: 'https://job-boards.greenhouse.io/acme/jobs/7' }];
+    expect(bestApplyOption(opts, SITES)).toMatchObject({ atsType: 'greenhouse', site: 'company' });
+    expect(bestApplyOption(opts.slice(0, 2), SITES)?.site).toBe('company');
+    expect(bestApplyOption(opts, ['linkedin'])?.link).toContain('linkedin.com');
+    expect(bestApplyOption(opts, ['bayt'])).toBeNull();
+  });
+  it('parses posted dates and salaries', () => {
+    expect(parsePostedAt('3 days ago', now)?.toISOString()).toBe('2026-10-17T12:00:00.000Z');
+    expect(parsePostedAt('30+ days ago', now)?.getTime()).toBe(now.getTime() - 30 * 864e5);
+    expect(parsePostedAt('whenever')).toBeUndefined();
+    expect(parseSalary('AED 20K–25K a month')).toEqual({ salaryMin: 20000, salaryMax: 25000, salaryCurrency: 'AED', salaryPeriod: 'month' });
+    expect(parseSalary('$150,000 a year')).toEqual({ salaryMin: 150000, salaryMax: 150000, salaryCurrency: 'USD', salaryPeriod: 'year' });
+  });
+  it('builds role × location queries, capped', () => {
+    const q = buildQueries({ titles: ['Backend Engineer', 'AI Engineer'], searchLocations: ['Dubai', 'Abu Dhabi'], locations: [], searchCountry: 'ae', maxSearchQueries: 3 }, ['backend engineer ', 'Python Engineer']);
+    expect(q).toEqual([{ q: 'Backend Engineer', location: 'Dubai', country: 'ae' }, { q: 'Backend Engineer', location: 'Abu Dhabi', country: 'ae' }, { q: 'AI Engineer', location: 'Dubai', country: 'ae' }]);
+  });
+  it('Google Jobs (SerpApi) normalises results and applies the site filter', async () => {
+    mockFetch({ 'engine=google_jobs': { jobs_results: [
+      { job_id: 'g1', title: 'Backend Engineer', company_name: 'Acme', location: 'Dubai - United Arab Emirates', description: 'Python and PostgreSQL', detected_extensions: { posted_at: '2 days ago', schedule_type: 'Full-time', salary: 'AED 20K–25K a month' },
+        apply_options: [{ title: 'LinkedIn', link: 'https://ae.linkedin.com/jobs/view/backend-engineer-at-acme-111?trk=x' }, { title: 'Greenhouse', link: 'https://job-boards.greenhouse.io/acme/jobs/5?gh_src=g' }] },
+      { job_id: 'g2', title: 'Data Engineer', company_name: 'Beta', location: 'Dubai', description: 'Spark', apply_options: [{ title: 'Bayt', link: 'https://www.bayt.com/en/uae/jobs/data-engineer-1/' }] },
+    ] } });
+    const hits = await SEARCH.GOOGLE_JOBS({ apiKey: 'k' }, { q: 'Backend Engineer', location: 'Dubai', country: 'ae' }, ['linkedin', 'company']);
+    expect(hits).toHaveLength(1); // Bayt-only job filtered out
+    expect(hits[0]).toMatchObject({ title: 'Backend Engineer', company: 'Acme', atsType: 'greenhouse', atsMeta: { board: 'acme', jobId: '5' }, salaryMin: 20000, salaryCurrency: 'AED', employmentType: 'Full-time', viaLabel: 'Google Jobs · Company careers page' });
+    expect(hits[0].canonicalUrl).toBe('https://job-boards.greenhouse.io/acme/jobs/5');
+    expect(String((global.fetch as jest.Mock).mock.calls[0][0])).toContain('gl=ae');
+  });
+  it('surfaces a rejected key as non-retryable', async () => {
+    mockFetch({ 'engine=google_jobs': new Response('{}', { status: 401 }) });
+    await expect(SEARCH.GOOGLE_JOBS({ apiKey: 'bad' }, { q: 'x', location: '', country: 'ae' }, SITES)).rejects.toMatchObject({ retryable: false });
+  });
+  it('Jooble', async () => {
+    mockFetch({ 'jooble.org/api/': { jobs: [{ id: 7, title: 'Python Engineer', company: 'Gamma', location: 'Dubai', snippet: '<b>Python</b> &amp; Django', source: 'gulftalent.com', link: 'https://jooble.org/desc/7', updated: '2026-10-18T00:00:00' }] } });
+    const [j] = await SEARCH.JOOBLE({ apiKey: 'k' }, { q: 'Python Engineer', location: 'Dubai', country: 'ae' }, SITES);
+    expect(j).toMatchObject({ title: 'Python Engineer', company: 'Gamma', site: 'gulftalent', description: 'Python & Django', atsType: 'other' });
+  });
+});
+
 describe('URLs, alerts and dedupe', () => {
+  it('Indeed links: classified, canonical and parsed from alert emails', () => {
+    expect(classifyUrl('https://ae.indeed.com/viewjob?jk=abc123').atsType).toBe('indeed');
+    expect(canonicalUrl('https://ae.indeed.com/rc/clk?jk=abc123&from=alert&tk=1')).toBe('https://ae.indeed.com/viewjob?jk=abc123');
+    const { jobs } = parseAlertEmail('Backend Engineer\nAcme\nDubai\nhttps://ae.indeed.com/rc/clk?jk=abc123&from=ja\n');
+    expect(jobs[0]).toMatchObject({ title: 'Backend Engineer', company: 'Acme', atsType: 'indeed', canonicalUrl: 'https://ae.indeed.com/viewjob?jk=abc123' });
+  });
   it('matches hosts by exact domain, not substring', () => {
     expect(classifyUrl('https://evil-linkedin.com/jobs/view/1').atsType).toBe('other');
     expect(classifyUrl('https://linkedin.com.evil.io/jobs/view/1').atsType).toBe('other');
