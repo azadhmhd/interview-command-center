@@ -396,12 +396,12 @@ function CopyForJobSheet({ draft, open, onClose }: { draft: Draft; open: boolean
   );
 }
 
-async function downloadPdf(id: string, title: string) {
+async function downloadPdf(id: string) {
   const ws = getWorkspace();
   const res = await fetch(`/api/resume-drafts/${id}/pdf`, { headers: ws ? { 'x-workspace-id': ws } : {} });
   if (!res.ok) throw new ApiError((await res.json().catch(() => null))?.message ?? `PDF failed (${res.status})`, res.status, null);
   const url = URL.createObjectURL(await res.blob());
-  const a = Object.assign(document.createElement('a'), { href: url, download: `${title.replace(/[^\w.\- ]/g, '_') || 'resume'}.pdf` });
+  const a = Object.assign(document.createElement('a'), { href: url, download: res.headers.get('content-disposition')?.match(/filename="([^"]+)"/)?.[1] ?? 'Resume.pdf' });
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -555,7 +555,7 @@ export default function ResumeEditorPage() {
           className="h-10 w-40 truncate rounded-lg border border-border bg-surface-2 pl-4 pr-8 text-[15px] font-semibold text-text">
           {(drafts ?? [{ id, title: doc.title } as DraftSummary]).map((x) => <option key={x.id} value={x.id}>{x.id === id ? doc.title : x.title}</option>)}
         </select>
-        <button type="button" disabled={busy === 'pdf'} onClick={() => run('pdf', async () => { await flush(); await downloadPdf(id, doc.title); })}
+        <button type="button" disabled={busy === 'pdf'} onClick={() => run('pdf', async () => { await flush(); await downloadPdf(id); })}
           className="inline-flex h-10 w-[148px] shrink-0 items-center justify-center gap-2 rounded-lg bg-accent text-[15px] font-semibold text-accent-fg hover:opacity-90 disabled:opacity-60">
           Download<Download className="h-4 w-4" />
         </button>

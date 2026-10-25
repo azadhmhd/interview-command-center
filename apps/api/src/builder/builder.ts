@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { WorkspaceAccess } from '../workspaces/workspaces';
 import { DEFAULT_DESIGN, fromProfile, normalizeContent, resumeContentSchema, resumeDesignSchema } from './content';
-import { ResumeJobs, resumeFileName } from './jobs';
+import { ResumeJobs } from './jobs';
 
 const createSchema = z.object({ title: z.string().max(120).optional(), from: z.enum(['profile', 'blank']).default('profile') });
 const saveSchema = z.object({
@@ -119,7 +119,7 @@ export class ResumeDraftsController {
     const d = await this.find(ctx, id);
     const { pdf, pages } = await this.jobs.render(d);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${resumeFileName(d)}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${await this.jobs.fileName(d)}"`);
     res.setHeader('X-Page-Count', String(pages));
     res.send(pdf);
   }
