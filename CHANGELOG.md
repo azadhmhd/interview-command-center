@@ -5,6 +5,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-25
+
 ### Added
 - **Coding practice** ([docs](docs/CODING_PRACTICE.md)): 93 original coding interview problems in sixteen sections
   (Two Pointers to Matrices). Each section has a step-by-step animated visual (play, pause, step, speed), an overview

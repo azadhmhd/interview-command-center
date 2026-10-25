@@ -1,6 +1,6 @@
 {
   "name": "interview-command-center",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Self-hosted job search tracker, interview journal and AI-assisted interview preparation that works with any OpenAI-compatible LLM or your coding-agent subscription.",
   "license": "MIT",
