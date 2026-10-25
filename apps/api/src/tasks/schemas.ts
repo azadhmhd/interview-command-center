@@ -3,6 +3,7 @@
  * exported as JSON Schema into the agent skill pack (scripts/gen-schemas.ts). No Nest imports here.
  */
 import { z } from 'zod';
+import { resumeContentSchema, tailoringSchema } from '../builder/content';
 
 const str = (max = 20000) => z.string().max(max);
 const list = (max = 30, len = 500) => z.array(z.string().max(len)).max(max).default([]);
@@ -51,6 +52,24 @@ export const OUTPUT_SCHEMAS = {
     followUps: list(10, 500),
     confidence: z.enum(['low', 'medium', 'high']).describe('Your confidence in this evaluation'),
   }),
+  code_review: z.object({
+    verdict: z.enum(['solved', 'partially_solved', 'not_solved']).describe('From the test results and your reading of the code'),
+    score: z.number().min(0).max(10).describe('Overall 0-10'),
+    scores: z.object({
+      correctness: z.number().min(0).max(10), approach: z.number().min(0).max(10).describe('Algorithm and structure chosen'),
+      verification: z.number().min(0).max(10).describe('Edge cases handled, tests run, checks described in the notes'),
+      codeQuality: z.number().min(0).max(10), communication: z.number().min(0).max(10).describe('How clearly the notes explain the plan, AI use and decisions; 0-3 if there are no notes'),
+    }),
+    summary: str(3000).min(10),
+    strengths: list(10, 500),
+    issues: z.array(z.object({ severity: z.enum(['high', 'medium', 'low']), line: z.number().int().min(1).optional(), problem: str(1000), fix: str(1500) })).max(20).default([]),
+    edgeCases: list(15, 300).describe('Inputs the code gets wrong or does not consider'),
+    complexity: z.object({ time: str(200), space: str(200) }),
+    suggestions: list(10, 500).describe('Concrete next steps, most valuable first'),
+    improvedSolution: str(30000).describe('A clean, correct solution in the same language and with the same function/class name'),
+    interviewTips: list(8, 500).describe('How to plan, drive the AI, verify and narrate better on this problem'),
+    confidence: z.enum(['low', 'medium', 'high']),
+  }),
   answer_improvement: z.object({
     improvedAnswer: str(20000).min(10),
     conceptsCorrect: list(20, 200),
@@ -69,6 +88,8 @@ export const OUTPUT_SCHEMAS = {
     projects: z.array(z.object({ name: str(200), summary: str(1000) })).max(20).default([]),
     certifications: list(20, 200),
   }),
+  resume_draft_import: resumeContentSchema,
+  resume_tailoring: tailoringSchema,
   question_extraction: z.object({
     questions: z.array(z.object({ prompt: str(4000).min(3), answer: str(20000).optional(), followUps: str(4000).optional(), tags: list(10, 60) })).max(100),
   }),
@@ -124,8 +145,11 @@ export const TASK_SKILLS: Record<TaskType, string> = {
   course_generation: 'icc-prepare-interview',
   lesson_regeneration: 'icc-prepare-interview',
   answer_evaluation: 'icc-evaluate-answer',
+  code_review: 'icc-code-review',
   answer_improvement: 'icc-model-answers',
   resume_extraction: 'icc-import-validate',
+  resume_draft_import: 'icc-import-validate',
+  resume_tailoring: 'icc-tailor-resume',
   question_extraction: 'icc-import-validate',
   revision_notes: 'icc-final-revision',
   gap_analysis: 'icc-evaluate-answer',

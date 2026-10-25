@@ -1,7 +1,8 @@
 import { dedupeKey } from '../applications/applications';
 import { verifyEvidence } from './autoapply.service';
 import { buildKit, standingAnswersSchema } from './kit';
-import { DEFAULT_PREFERENCES, scoreJob, selectResume } from './matching';
+import { DEFAULT_PREFERENCES, scoreJob, selectResume, atsScore, ATS_MIN } from './matching';
+import { bestApplyOption, buildQueries, parsePostedAt, parseSalary, SEARCH, siteOf, SITES } from './search';
 import { ADAPTERS, canonicalUrl, classifyUrl, parseAlertEmail } from './sources';
 import { canMove, PRESETS } from './state';
 
@@ -51,7 +52,64 @@ describe('source adapters normalise to one shape', () => {
   });
 });
 
+describe('role search providers', () => {
+  const now = new Date('2026-10-20T12:00:00Z');
+  it('classifies sites and picks the best allowed apply link', () => {
+    expect(siteOf('https://ae.linkedin.com/jobs/view/123')).toBe('linkedin');
+    expect(siteOf('https://ae.indeed.com/viewjob?jk=abc')).toBe('indeed');
+    expect(siteOf('https://www.glassdoor.com.br/job/1', 'Glassdoor', 'ByteDance')).toBe('other');
+    expect(siteOf('https://www.jobilize.com/job/ae-dubai-backend', 'Acme Careers', 'Acme')).toBe('other'); // reposting site, whatever its label says
+    expect(siteOf('https://careers.deliveryhero.com/job/1', '', 'Delivery Hero')).toBe('company');
+    expect(siteOf('https://careers.edgegroup.ae/job/1', '', 'EDGE Group PJSC')).toBe('company');
+    expect(siteOf('https://acme.wd3.myworkdayjobs.com/x', '', 'Other Name')).toBe('company');
+    expect(siteOf('https://evil-linkedin.com/x')).toBe('other'); // strict host match
+    const opts = [{ title: 'LinkedIn', link: 'https://www.linkedin.com/jobs/view/9' }, { title: 'Acme Careers', link: 'https://careers.acme.com/1' }, { title: 'Greenhouse', link: 'https://job-boards.greenhouse.io/acme/jobs/7' }];
+    expect(bestApplyOption(opts, SITES, 'Acme')).toMatchObject({ atsType: 'greenhouse', site: 'company' });
+    expect(bestApplyOption(opts.slice(0, 2), SITES, 'Acme')?.site).toBe('company');
+    expect(bestApplyOption(opts, ['linkedin'])?.link).toContain('linkedin.com');
+    expect(bestApplyOption(opts, ['bayt'])).toBeNull();
+  });
+  it('parses posted dates and salaries', () => {
+    expect(parsePostedAt('3 days ago', now)?.toISOString()).toBe('2026-10-17T12:00:00.000Z');
+    expect(parsePostedAt('30+ days ago', now)?.getTime()).toBe(now.getTime() - 30 * 864e5);
+    expect(parsePostedAt('whenever')).toBeUndefined();
+    expect(parseSalary('AED 20K–25K a month')).toEqual({ salaryMin: 20000, salaryMax: 25000, salaryCurrency: 'AED', salaryPeriod: 'month' });
+    expect(parseSalary('$150,000 a year')).toEqual({ salaryMin: 150000, salaryMax: 150000, salaryCurrency: 'USD', salaryPeriod: 'year' });
+  });
+  it('builds role × location queries, capped', () => {
+    const q = buildQueries({ titles: ['Backend Engineer', 'AI Engineer'], searchLocations: ['Dubai', 'Abu Dhabi'], locations: [], searchCountry: 'ae', maxSearchQueries: 3 }, ['backend engineer ', 'Python Engineer']);
+    expect(q).toEqual([{ q: 'Backend Engineer', location: 'Dubai', country: 'ae' }, { q: 'Backend Engineer', location: 'Abu Dhabi', country: 'ae' }, { q: 'AI Engineer', location: 'Dubai', country: 'ae' }]);
+  });
+  it('Google Jobs (SerpApi) normalises results and applies the site filter', async () => {
+    mockFetch({ 'engine=google_jobs': { jobs_results: [
+      { job_id: 'g1', title: 'Backend Engineer', company_name: 'Acme', location: 'Dubai - United Arab Emirates', description: 'Python and PostgreSQL', detected_extensions: { posted_at: '2 days ago', schedule_type: 'Full-time', salary: 'AED 20K–25K a month' },
+        apply_options: [{ title: 'LinkedIn', link: 'https://ae.linkedin.com/jobs/view/backend-engineer-at-acme-111?trk=x' }, { title: 'Greenhouse', link: 'https://job-boards.greenhouse.io/acme/jobs/5?gh_src=g' }] },
+      { job_id: 'g2', title: 'Data Engineer', company_name: 'Beta', location: 'Dubai', description: 'Spark', apply_options: [{ title: 'Bayt', link: 'https://www.bayt.com/en/uae/jobs/data-engineer-1/' }] },
+    ] } });
+    const hits = await SEARCH.GOOGLE_JOBS({ apiKey: 'k' }, { q: 'Backend Engineer', location: 'Dubai', country: 'ae' }, ['linkedin', 'company']);
+    expect(hits).toHaveLength(1); // Bayt-only job filtered out
+    expect(hits[0]).toMatchObject({ title: 'Backend Engineer', company: 'Acme', atsType: 'greenhouse', atsMeta: { board: 'acme', jobId: '5' }, salaryMin: 20000, salaryCurrency: 'AED', employmentType: 'Full-time', viaLabel: 'Google Jobs · Company careers page' });
+    expect(hits[0].canonicalUrl).toBe('https://job-boards.greenhouse.io/acme/jobs/5');
+    expect(String((global.fetch as jest.Mock).mock.calls[0][0])).toContain('gl=ae');
+  });
+  it('surfaces a rejected key as non-retryable', async () => {
+    mockFetch({ 'engine=google_jobs': new Response('{}', { status: 401 }) });
+    await expect(SEARCH.GOOGLE_JOBS({ apiKey: 'bad' }, { q: 'x', location: '', country: 'ae' }, SITES)).rejects.toMatchObject({ retryable: false });
+  });
+  it('Jooble', async () => {
+    mockFetch({ 'jooble.org/api/': { jobs: [{ id: 7, title: 'Python Engineer', company: 'Gamma', location: 'Dubai', snippet: '<b>Python</b> &amp; Django', source: 'gulftalent.com', link: 'https://jooble.org/desc/7', updated: '2026-10-18T00:00:00' }] } });
+    const [j] = await SEARCH.JOOBLE({ apiKey: 'k' }, { q: 'Python Engineer', location: 'Dubai', country: 'ae' }, SITES);
+    expect(j).toMatchObject({ title: 'Python Engineer', company: 'Gamma', site: 'gulftalent', description: 'Python & Django', atsType: 'other' });
+  });
+});
+
 describe('URLs, alerts and dedupe', () => {
+  it('Indeed links: classified, canonical and parsed from alert emails', () => {
+    expect(classifyUrl('https://ae.indeed.com/viewjob?jk=abc123').atsType).toBe('indeed');
+    expect(canonicalUrl('https://ae.indeed.com/rc/clk?jk=abc123&from=alert&tk=1')).toBe('https://ae.indeed.com/viewjob?jk=abc123');
+    const { jobs } = parseAlertEmail('Backend Engineer\nAcme\nDubai\nhttps://ae.indeed.com/rc/clk?jk=abc123&from=ja\n');
+    expect(jobs[0]).toMatchObject({ title: 'Backend Engineer', company: 'Acme', atsType: 'indeed', canonicalUrl: 'https://ae.indeed.com/viewjob?jk=abc123' });
+  });
   it('matches hosts by exact domain, not substring', () => {
     expect(classifyUrl('https://evil-linkedin.com/jobs/view/1').atsType).toBe('other');
     expect(classifyUrl('https://linkedin.com.evil.io/jobs/view/1').atsType).toBe('other');
@@ -103,8 +161,39 @@ describe('matching', () => {
     expect(m.breakdown.skills.reason).toMatch(/Python/);
     expect(m.explanation).toMatch(/Strong match/);
   });
+  it('off-target titles never reach the shortlist; one listed technology is not a full skills match (real Ziina case)', () => {
+    const analyst = scoreJob(job({ title: 'Finance Data Analyst', description: 'Reporting in Python and Excel for the finance team.' }), prefs, facts, now);
+    expect(analyst.score).toBeLessThan(60);
+    expect(analyst.breakdown.skills.score).toBe(33);
+    for (const title of ['Senior Corporate Legal Counsel', 'Senior Product Designer (Design Systems)']) expect(scoreJob(job({ title }), prefs, facts, now).score).toBeLessThan(60); // real Binance / Careem titles
+    expect(scoreJob(job(), prefs, facts, now).score).toBeGreaterThanOrEqual(80);
+  });
+  it('a title in a language you do not use is not your role (real Google Jobs case)', () => {
+    const java = scoreJob(job({ title: 'Senior Java Backend Engineer | Redis & Postgres', description: 'Strong Java expertise, Redis caching and PostgreSQL.' }), prefs, facts, now);
+    expect(java.breakdown.title.reason).toMatch(/Title asks for Java/);
+    expect(java.missingSkills).toContain('Java');
+    expect(java.score).toBeLessThan(75); // never auto-applied
+    expect(scoreJob(job({ title: 'Senior .NET Backend Engineer', description: 'C# and .NET Core' }), prefs, facts, now).score).toBeLessThan(75);
+    expect(scoreJob(job({ title: 'Senior.NET Backend Engineer | Microservices' }), prefs, facts, now).breakdown.title.reason).toMatch(/\.NET/); // real title
+    expect(scoreJob(job({ description: 'Python, Django, PostgreSQL. Apply at careers.acme.net' }), prefs, facts, now).missingSkills).not.toContain('.NET');
+    expect(scoreJob(job({ title: 'Senior Backend Engineer (JavaScript)' }), prefs, facts, now).breakdown.title.reason).toMatch(/JavaScript/);
+  });
+  it('ATS score: share of the job\'s technologies and title words found in the CV, with the missing ones listed', () => {
+    const cv = 'Senior Backend Engineer. Python, Django, FastAPI, PostgreSQL, Redis, Docker, Kubernetes, AWS.';
+    const full = atsScore(cv, { title: 'Senior Backend Engineer', description: 'Python, Django and PostgreSQL on AWS.' });
+    expect(full.score).toBe(100);
+    const gap = atsScore(cv, { title: 'Backend Engineer, Payments', description: 'Go, Kafka and PostgreSQL. Python is a plus.' });
+    expect(gap.missing).toEqual(expect.arrayContaining(['go', 'kafka', 'payments']));
+    expect(gap.score).toBeLessThan(ATS_MIN);
+    expect(atsScore(cv, { title: 'Engineer' }).score).toBe(100); // nothing to match against
+  });
   it('applies hard eligibility rules before recommending', () => {
     expect(scoreJob(job({ location: 'London, UK' }), prefs, facts, now).blockers.join()).toMatch(/Outside your locations/);
+    // a country covers its emirates and other names; a city stays a city (real case: "Ajman" with "UAE" in locations)
+    const uae = { ...prefs, locations: ['UAE'] };
+    for (const location of ['Ajman', 'Ras Al Khaimah', 'Dubai, United Arab Emirates', 'Sharjah - U.A.E.']) expect(scoreJob(job({ location }), uae, facts, now).blockers).toEqual([]);
+    expect(scoreJob(job({ location: 'Ajman' }), { ...prefs, locations: ['Dubai'] }, facts, now).blockers.join()).toMatch(/Outside your locations \(Ajman\)/);
+    expect(scoreJob(job({ location: 'Riyadh, Saudi Arabia' }), uae, facts, now).blockers.join()).toMatch(/Outside your locations/);
     expect(scoreJob(job({ description: 'UAE nationals only. Python.' }), prefs, facts, now).blockers.join()).toMatch(/citizens|nationals/);
     expect(scoreJob(job({ description: 'Fluent Arabic is required. Python.' }), prefs, facts, now).blockers.join()).toMatch(/Arabic/);
     expect(scoreJob(job({ description: 'Requires 12+ years of experience with Python' }), prefs, facts, now).blockers.join()).toMatch(/12\+ years/);
@@ -178,6 +267,25 @@ describe('apply kit', () => {
     expect(by.privacy).toMatchObject({ answer: 'Yes', source: 'standing' });
     expect(by.q_why).toMatchObject({ source: 'ai' });
     expect(k.complete).toBe(true);
+  });
+  it('answers facts from the CV and saved answers (real Binance / Bybit questions)', () => {
+    const cv = 'Senior Backend Engineer\nAcme Fintech 2023 – Present | Dubai, UAE\nWill be on call; p99 200 ms.\nScrum Master duties.\nEDUCATION\nB.Tech Computer science and Engineering';
+    const q = (key: string, label: string, options?: string[]) => ({ key, label, required: true, type: options ? 'multi_value_single_select' : 'input_text', options });
+    const real = [
+      q('live', 'Where do you currently live?', ['Afghanistan', 'Saudi Arabia', 'United Arab Emirates', 'United Kingdom']),
+      q('edu', 'What is your highest level of education?', ['High school', "Bachelor's or equivalent", "Master's", 'PhD']),
+      { ...q('lang', 'What language(s) can you speak at a native or business level?', ['Arabic', 'English', 'Hindi']), type: 'multi_value_multi_select' },
+      q('emp', 'What is your current employment status?', ['Employed full-time', 'Self-employed', 'Unemployed', 'Student']),
+      q('before', 'Have you ever been employed at Binance before?', ['Yes', 'No']),
+      q('hear', 'How did you hear about our job opening? Please select one of the following options:', ['LinkedIn', 'Company Website', 'Referral', 'Other']),
+    ];
+    const k = buildKit({ ...base, company: 'Binance', sourceLabel: 'Binance', resumeText: cv, questions: real, standing: standingAnswersSchema.parse({ currentLocation: 'Dubai, UAE', languages: 'English, Malayalam' }) });
+    const by = Object.fromEntries(k.answers.map((a) => [a.key, a.answer]));
+    expect(by).toEqual({ live: 'United Arab Emirates', edu: "Bachelor's or equivalent", lang: 'English', emp: 'Employed full-time', before: 'No', hear: 'Company Website' });
+    expect(k.complete).toBe(true);
+    // never claims what the CV doesn't say
+    expect(buildKit({ ...base, company: 'Acme Fintech', resumeText: cv, questions: [real[4]], standing: standingAnswersSchema.parse({}) }).answers[0].answer).toBe(''); // Acme is in the CV
+    expect(buildKit({ ...base, resumeText: 'Will be on call; 200 ms. Scrum Master.', questions: [real[1]], standing: standingAnswersSchema.parse({}) }).answers[0].answer).toBe('');
   });
   it('rejects answers that are not valid options', () => {
     const k = buildKit({ ...base, questions: [questions[4]], standing: standingAnswersSchema.parse({ workAuthorization: 'Pending visa transfer' }) });

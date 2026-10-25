@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { ApplicationForm } from '@/components/application-form';
+import { JobResumes } from '@/components/resume/job-resumes';
 import { ShareDialog } from '@/components/share-dialog';
 import { Badge, Button, Card, CardHeader, Dialog, EmptyState, ErrorBox, Input, Loading, Markdown, PageHeader, Select, StateBadge, useAction } from '@/components/ui';
 import { api, refresh, useApi } from '@/lib/api';
@@ -134,6 +135,8 @@ export default function ApplicationPage() {
             </dl>
             {a.companyNotes && <div className="border-t border-border p-4"><Markdown>{a.companyNotes}</Markdown></div>}
           </Card>
+
+          <JobResumes applicationId={id} />
 
           <Card>
             <CardHeader title="Preparation" action={<Button size="sm" variant="outline" loading={busy === 'research'} onClick={async () => { const t = await run('research', () => api<{ id: string }>(`/applications/${id}/research`, { method: 'POST' }), 'Research task created'); if (t) router.push(`/tasks/${t.id}`); }}><Search className="h-3.5 w-3.5" />Research</Button>} />

@@ -3,6 +3,7 @@ import { AgentTask, Prisma } from '@prisma/client';
 import { AgentPackages } from '../agents/packages';
 import { stableHash } from '../common/crypto';
 import { readSettings } from '../common/workspace-settings';
+import { config } from '../config';
 import { LlmError, LlmService } from '../llm/llm.service';
 import { PrismaService } from '../prisma.service';
 import { OutputSource, TaskDefinitions } from './definitions';
@@ -91,15 +92,30 @@ export class TaskRunner {
       await this.tasks.move(current, 'retry_wait', { lastError: msg.slice(0, 2000), nextRetryAt: new Date(Date.now() + backoffMs(current.attempts)), leaseOwner: null, leaseExpiresAt: null });
       return;
     }
+    await this.afterLastAttempt(await this.tasks.move(current, 'failed', { lastError: msg.slice(0, 2000), leaseOwner: null, leaseExpiresAt: null }), msg);
+  }
+
+  /**
+   * A task out of attempts (failed, or its worker lease expired for good): an LLM task goes to Claude Code (headless,
+   * your subscription) with fresh attempts when that is on, then to manual handoff; otherwise it stays failed.
+   * Returns the task as moved: a queued one still needs enqueueing (the tick picks up stale queued tasks too).
+   */
+  async afterLastAttempt(task: AgentTask, msg: string): Promise<AgentTask> {
     const ws = await this.prisma.workspace.findUniqueOrThrow({ where: { id: task.workspaceId } });
-    if (readSettings(ws.settings).fallbackToAgent && current.executionMethod === 'llm') {
-      await this.tasks.move(current, 'ready_for_agent', {
-        executionMethod: 'agent_manual', lastError: msg.slice(0, 2000), leaseOwner: null, leaseExpiresAt: null,
-        routingReason: `LLM failed after ${current.attempts} attempt(s): ${msg.slice(0, 300)} → waiting for manual agent execution or retry`,
+    if (!readSettings(ws.settings).fallbackToAgent) return task;
+    if (task.executionMethod === 'llm' && config.claudeCli.enabled && task.type !== 'job_application') {
+      return this.tasks.move(task, 'queued', {
+        executionMethod: 'agent_cli', attempts: 0, nextRetryAt: null,
+        routingReason: `LLM failed after ${task.attempts} attempt(s): ${msg.slice(0, 300)} → Claude Code headless adapter`,
       });
-      return;
     }
-    await this.tasks.move(current, 'failed', { lastError: msg.slice(0, 2000), leaseOwner: null, leaseExpiresAt: null });
+    if (['llm', 'agent_cli'].includes(task.executionMethod)) {
+      return this.tasks.move(task, 'ready_for_agent', {
+        executionMethod: 'agent_manual',
+        routingReason: `${task.executionMethod === 'llm' ? 'LLM' : 'Claude Code'} failed after ${task.attempts} attempt(s): ${msg.slice(0, 300)} → waiting for manual agent execution or retry`,
+      });
+    }
+    return task;
   }
 
   /** Import agent output (manual upload or file sync). Validated; double imports are no-ops. */

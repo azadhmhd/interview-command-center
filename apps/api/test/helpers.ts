@@ -51,6 +51,17 @@ export async function fakeLlm() {
     if (user.includes('Evaluate the candidate')) return reply(JSON.stringify(EVALUATION));
     if (user.includes('improved, interview-ready answer')) return reply(JSON.stringify({ improvedAnswer: 'Use a sliding-window log or counter in Redis with Lua for atomicity...', conceptsCorrect: ['token bucket'], conceptsPartial: [], conceptsMissed: ['sliding window'], mistakes: 'Did not discuss distributed counters', communicationNotes: 'Lead with requirements' }));
     if (user.includes('Extract structured information from the CV')) return reply(JSON.stringify({ name: 'Test Person', skills: ['Python', 'PostgreSQL'], roles: [{ company: 'Acme', title: 'Engineer', highlights: [] }] }));
+    if (user.includes('Convert the CV text into the resume builder structure')) return reply(JSON.stringify(IMPORTED_RESUME));
+    if (user.includes('Tailor this copy of the candidate')) {
+      // reverse the first entry's bullets and first skill group; try to invent a metric in the second entry (must be rejected)
+      const ctx = JSON.parse(user.slice(user.indexOf('<context>') + 9, user.indexOf('</context>')));
+      const entries = ctx.resume.sections.flatMap((x: { entries: { id: string; bullets: string[] }[] }) => x.entries).filter((e: { bullets: string[] }) => e.bullets.length);
+      const group = ctx.resume.sections.flatMap((x: { groups: { id: string; items: string[] }[] }) => x.groups)[0];
+      return reply(JSON.stringify({
+        entries: [{ id: entries[0].id, bullets: [...entries[0].bullets].reverse() }, ...(entries[1] ? [{ id: entries[1].id, bullets: ['Grew revenue by 999%'] }] : [])],
+        skillGroups: group ? [{ id: group.id, items: [...group.items].reverse() }] : [], notes: `Tailored for ${ctx.job.company}`,
+      }));
+    }
     if (user.includes('mock interview questions')) return reply(JSON.stringify({ questions: [{ prompt: 'How would you shard a chat service?', modelAnswer: 'By conversation id...', followUps: [] }] }));
     return reply(JSON.stringify({}));
   });
@@ -76,4 +87,13 @@ export const COURSE = {
 export const EVALUATION = {
   score: 6.5, rubric: { correctness: 7, completeness: 6, depth: 6, clarity: 7 }, missingConcepts: ['sliding window'], incorrectClaims: [],
   improvements: ['Discuss distributed counters'], strongAnswer: 'A strong answer would...', followUps: ['Multi-region?'], confidence: 'medium',
+};
+
+export const IMPORTED_RESUME = {
+  header: { fullName: 'Sam Rivera', headline: 'Backend Engineer', email: 'sam@example.test', phone: '+971 50 000 0000', location: 'Dubai', links: [{ label: 'samrivera', url: 'linkedin.com/in/samrivera' }] },
+  sections: [
+    { kind: 'summary', title: '', text: 'Backend engineer with 7 years of Python.' },
+    { kind: 'skills', title: 'Skills', groups: [{ label: 'Backend & Languages', items: ['Python', 'Django', 'FastAPI'] }] },
+    { kind: 'experience', title: 'Work Experience', entries: [{ title: 'Senior Engineer', subtitle: 'Acme', start: '2021', end: 'Present', location: 'Dubai, UAE', bullets: ['Built the payments API serving 2M users'] }] },
+  ],
 };

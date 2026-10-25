@@ -1,0 +1,182 @@
+{
+  "$id": "icc/code_review",
+  "title": "code_review",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "solved",
+        "partially_solved",
+        "not_solved"
+      ],
+      "description": "From the test results and your reading of the code"
+    },
+    "score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10,
+      "description": "Overall 0-10"
+    },
+    "scores": {
+      "type": "object",
+      "properties": {
+        "correctness": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "approach": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Algorithm and structure chosen"
+        },
+        "verification": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Edge cases handled, tests run, checks described in the notes"
+        },
+        "codeQuality": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "communication": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "How clearly the notes explain the plan, AI use and decisions; 0-3 if there are no notes"
+        }
+      },
+      "required": [
+        "correctness",
+        "approach",
+        "verification",
+        "codeQuality",
+        "communication"
+      ]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 3000
+    },
+    "strengths": {
+      "default": [],
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "issues": {
+      "default": [],
+      "maxItems": 20,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "line": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "problem": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "fix": {
+            "type": "string",
+            "maxLength": 1500
+          }
+        },
+        "required": [
+          "severity",
+          "problem",
+          "fix"
+        ]
+      }
+    },
+    "edgeCases": {
+      "default": [],
+      "description": "Inputs the code gets wrong or does not consider",
+      "maxItems": 15,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "complexity": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "space": {
+          "type": "string",
+          "maxLength": 200
+        }
+      },
+      "required": [
+        "time",
+        "space"
+      ]
+    },
+    "suggestions": {
+      "default": [],
+      "description": "Concrete next steps, most valuable first",
+      "maxItems": 10,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "improvedSolution": {
+      "type": "string",
+      "maxLength": 30000,
+      "description": "A clean, correct solution in the same language and with the same function/class name"
+    },
+    "interviewTips": {
+      "default": [],
+      "description": "How to plan, drive the AI, verify and narrate better on this problem",
+      "maxItems": 8,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 500
+      }
+    },
+    "confidence": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    }
+  },
+  "required": [
+    "verdict",
+    "score",
+    "scores",
+    "summary",
+    "complexity",
+    "improvedSolution",
+    "confidence"
+  ]
+}

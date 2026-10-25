@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { AgentTask } from '@prisma/client';
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { getFile } from '../common/storage';
 import { config } from '../config';
 import { PrismaService } from '../prisma.service';
 import { TaskDefinitions } from '../tasks/definitions';
@@ -80,8 +81,8 @@ export class AgentPackages {
     if (!name) return;
     const { leadId } = task.inputSnapshot as { leadId: string };
     const lead = await this.prisma.jobLead.findFirst({ where: { id: leadId, workspaceId: task.workspaceId }, include: { resume: true } });
-    const src = lead?.resume?.storagePath && resolve(lead.resume.storagePath);
-    if (src && src.startsWith(resolve(config.uploadDir) + sep)) await copyFile(src, join(dir, name));
+    const cv = lead?.resume?.storagePath && await getFile(lead.resume.storagePath);
+    if (cv) await writeFile(join(dir, name), cv);
   }
 
   async readOutput(taskId: string): Promise<unknown> {

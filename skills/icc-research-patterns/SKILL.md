@@ -7,7 +7,7 @@ description: Research public interview patterns for a company with citations (co
 Use for `company_research` tasks.
 
 ## Allowed sources
-Official careers / engineering pages, engineering blogs, technology documentation, reputable public interview reports and educational resources (e.g. structured interview guides such as Hello Interview's public articles) — **only where publicly accessible**.
+Official careers / engineering pages, engineering blogs, technology documentation, reputable public interview reports and educational resources — **only where publicly accessible**.
 
 ## Hard rules
 - Respect robots rules, site terms and rate limits. Never bypass paywalls, CAPTCHAs or authentication.

@@ -61,7 +61,8 @@ Source in `skills/`; installed copies in `agent-workspace/`.
 | `icc-evaluate-answer` | answer_evaluation, gap_analysis |
 | `icc-coding-practice` / `icc-system-design-practice` / `icc-behavioral-prep` | round-specific guidance used by the above |
 | `icc-final-revision` | revision_notes |
-| `icc-import-validate` | resume_extraction, question_extraction, output self-check |
+| `icc-import-validate` | resume_extraction, resume_draft_import, question_extraction, output self-check |
+| `icc-tailor-resume` | resume_tailoring |
 
 Output JSON Schemas (`skills/schemas/*.schema.json`) are generated from the API's Zod contracts:
 `pnpm --filter api gen:schemas`. Templates for courses, readiness reports and STAR stories are in `skills/templates/`.

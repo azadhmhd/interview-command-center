@@ -1,6 +1,7 @@
 # One Dockerfile for the whole app. Targets:
-#   api → NestJS API, also used by the worker service (different command)
-#   web → Next.js standalone server
+#   api    → NestJS API, also used by the worker service (different command)
+#   web    → Next.js standalone server
+#   runner → apply runner (Playwright + headless Chromium) for servers; compose profile "runner"
 # Both targets share the same install/build stage, so dependencies are installed and compiled once.
 
 FROM node:22-bookworm-slim AS base
@@ -31,6 +32,9 @@ WORKDIR /app
 COPY --from=build /out/api ./
 COPY --from=build /repo/apps/api/dist ./dist
 COPY --from=build /repo/apps/api/prisma ./prisma
+# Headless Chromium for resume PDFs (prints the web app's /print/resume page), shared by the node user
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN node node_modules/playwright/cli.js install --with-deps --only-shell chromium && rm -rf /var/lib/apt/lists/*
 # Agent skill pack: the worker installs it into the shared agent-workspace on start
 COPY skills ./skills
 RUN npx prisma generate && mkdir -p /data /agent-workspace && chown -R node:node /data /agent-workspace
@@ -46,3 +50,16 @@ COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
 USER node
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]
+
+FROM base AS runner
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/apply-runner/package.json apps/apply-runner/
+RUN pnpm install --frozen-lockfile --filter apply-runner...
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN cd apps/apply-runner && node node_modules/playwright/cli.js install --with-deps chromium && rm -rf /var/lib/apt/lists/*
+COPY apps/apply-runner/tsconfig.json apps/apply-runner/
+COPY apps/apply-runner/src apps/apply-runner/src
+WORKDIR /repo/apps/apply-runner
+USER node
+# a container restart leaves the profile lock of the killed process behind; only this container uses the profile
+CMD ["sh", "-c", "rm -f \"$HOME\"/.icc-apply-runner/profiles/*/.icc-runner.lock; exec node_modules/.bin/tsx src/main.ts"]

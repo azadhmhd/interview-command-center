@@ -7,6 +7,11 @@ x-app-env: &app-env
   APP_URL: ${APP_URL:-http://localhost:3000}
   COOKIE_SECURE: ${COOKIE_SECURE:-false}
   UPLOAD_DIR: /data/uploads
+  S3_ENDPOINT: http://minio:9000
+  WEB_INTERNAL_URL: http://web:3000 # resume PDFs: the API's headless browser prints the web app's /print/resume page
+  S3_BUCKET: ${S3_BUCKET:-icc}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-icc}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-icc-local-secret}
   AGENT_WORKSPACE_DIR: /agent-workspace/tasks
   LLM_ENABLED: ${LLM_ENABLED:-false}
   LLM_BASE_URL: ${LLM_BASE_URL:-}
@@ -46,6 +51,21 @@ services:
       interval: 5s
       retries: 20
 
+  minio:
+    # MinIO RELEASE.2024-10-13 built by Bitnami: minio/minio is no longer published on Docker Hub or quay.io
+    image: bitnamilegacy/minio:2024.10.13
+    # starts as root only to chown the data folder (volumes made by the old minio/minio image are root-owned), then runs MinIO as its own user
+    user: root
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-icc}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-icc-local-secret}
+    ports: ["127.0.0.1:9010:9000", "127.0.0.1:9011:9001"] # S3 API, web console
+    volumes: [miniodata:/bitnami/minio/data]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      retries: 20
+
   api:
     build: { context: ., target: api }
     image: icc-api:latest
@@ -54,6 +74,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
     volumes: [appdata:/data, ./agent-workspace:/agent-workspace]
     extra_hosts: ["host.docker.internal:host-gateway"]
     healthcheck:
@@ -82,7 +103,25 @@ services:
     depends_on:
       api: { condition: service_healthy }
 
+  # Headless apply runner for servers: applies to approved jobs on its own. Off unless COMPOSE_PROFILES=runner and
+  # ICC_RUNNER_TOKEN (Auto Apply → Settings → Runner tokens) are set in .env. Auto-submit vs fill-only follows your settings.
+  apply-runner:
+    profiles: [runner]
+    build: { context: ., target: runner }
+    image: icc-runner:latest
+    environment:
+      ICC_API_URL: http://api:4000
+      ICC_RUNNER_TOKEN: ${ICC_RUNNER_TOKEN:-}
+      APPLY_RUNNER_HEADLESS: "true"
+      APPLY_RUNNER_POLL_MS: ${APPLY_RUNNER_POLL_MS:-60000}
+    init: true # reaps Chromium's child processes
+    shm_size: 1gb # Chromium needs more than Docker's 64 MB /dev/shm
+    stop_grace_period: 2m # finish the current application before stopping
+    depends_on:
+      api: { condition: service_healthy }
+
 volumes:
   pgdata:
   redisdata:
   appdata:
+  miniodata:

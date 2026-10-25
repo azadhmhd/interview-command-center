@@ -1,18 +1,54 @@
 'use client';
-import { KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { Globe, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { AutoApplyNav } from '@/components/auto-apply-bits';
+import { AutoApplyNav, useScan } from '@/components/auto-apply-bits';
 import { Badge, Button, Card, CardHeader, ErrorBox, Field, Input, Loading, PageHeader, Select, Textarea, useAction } from '@/components/ui';
-import { api, useApi } from '@/lib/api';
-import { fmtDate } from '@/lib/utils';
+import { api, refresh, useApi } from '@/lib/api';
+import { fmtDate, relTime } from '@/lib/utils';
 
-interface Prefs { titles: string[]; locations: string[]; keywords: string[]; excludeKeywords: string[]; languages: string[]; minSalary?: number; salaryCurrency?: string; salaryPeriod?: 'year' | 'month'; remoteOk: boolean; maxAgeDays: number }
+interface Prefs { titles: string[]; locations: string[]; keywords: string[]; excludeKeywords: string[]; languages: string[]; minSalary?: number; salaryCurrency?: string; salaryPeriod?: 'year' | 'month'; remoteOk: boolean; maxAgeDays: number; searchLocations: string[]; searchCountry: string; sites: string[]; maxSearchQueries: number }
 interface Standing {
   fullName?: string; email?: string; phone?: string; linkedinUrl?: string; githubUrl?: string; websiteUrl?: string; currentLocation?: string; noticePeriod?: string;
-  salaryExpectation?: string; workAuthorization?: string; requiresSponsorship?: 'yes' | 'no'; willingToRelocate?: 'yes' | 'no'; demographics: 'decline' | 'ask_me';
+  salaryExpectation?: string; workAuthorization?: string; requiresSponsorship?: 'yes' | 'no'; willingToRelocate?: 'yes' | 'no'; educationLevel?: string; languages?: string; employmentStatus?: string; demographics: 'decline' | 'ask_me';
   consentToPrivacyNotices: boolean; consentToAccuracyDeclarations: boolean; custom: { match: string; answer: string }[];
 }
 interface Config { preferences: Prefs; standingAnswers: Standing; autoSubmit: boolean; minShortlistScore: number; minAutoApplyScore: number; dailyApplyCap: number; allowAiFreeText: boolean; discoveryHours: number }
+
+interface Provider { type: string; label: string; id: string | null; enabled: boolean; hasKey: boolean; apiKeyLast4: string | null; monthlyBudget: number; usedThisMonth: number; everyHours: number; lastRunAt: string | null; lastError: string | null; lastFoundCount: number }
+
+const SITES = [['linkedin', 'LinkedIn'], ['indeed', 'Indeed'], ['bayt', 'Bayt'], ['gulftalent', 'GulfTalent'], ['naukrigulf', 'Naukrigulf'], ['company', 'Company career pages'], ['other', 'Other job sites']] as const;
+const PROVIDER_HELP: Record<string, React.ReactNode> = {
+  GOOGLE_JOBS: <>Google's job index: LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf and company pages in one search. Free key (250 searches/month) at <a className="underline" href="https://serpapi.com/users/sign_up" target="_blank" rel="noreferrer">serpapi.com</a>.</>,
+  JOOBLE: <>Job aggregator with its own index. Free key from <a className="underline" href="https://jooble.org/api/about" target="_blank" rel="noreferrer">jooble.org/api/about</a>.</>,
+};
+
+function ProviderRow({ p }: { p: Provider }) {
+  const { busy, run } = useAction();
+  const { scanning, scan } = useScan();
+  const [key, setKey] = useState('');
+  const [budget, setBudget] = useState(String(p.monthlyBudget));
+  const [hours, setHours] = useState(String(p.everyHours));
+  const save = async (body: Record<string, unknown>, msg = 'Saved') => { if (await run('s', () => api(`/autoapply/providers/${p.type}`, { method: 'PUT', body }), msg)) { setKey(''); refresh('/autoapply'); } };
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="flex-1 text-sm font-medium">{p.label} {p.hasKey ? <Badge tone="success">key …{p.apiKeyLast4}</Badge> : <Badge>no key</Badge>} {p.hasKey && !p.enabled && <Badge>paused</Badge>}</p>
+        {p.hasKey && <Button size="sm" variant="ghost" onClick={() => save({ enabled: !p.enabled })}>{p.enabled ? 'Pause' : 'Resume'}</Button>}
+        {p.id && p.hasKey && <Button size="sm" variant="outline" loading={scanning === p.id} onClick={() => scan(p.id!)}>Search now</Button>}
+      </div>
+      <p className="text-xs text-muted">{PROVIDER_HELP[p.type]}</p>
+      <div className="grid gap-2 sm:grid-cols-[1fr_140px_140px_auto] sm:items-end">
+        <Field label={p.hasKey ? 'Replace API key' : 'API key'}><Input type="password" autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} placeholder={p.hasKey ? 'stored encrypted' : 'paste key'} /></Field>
+        <Field label="Searches / month"><Input type="number" min={1} value={budget} onChange={(e) => setBudget(e.target.value)} /></Field>
+        <Field label="Search every (hours)"><Input type="number" min={1} max={168} value={hours} onChange={(e) => setHours(e.target.value)} /></Field>
+        <Button size="sm" loading={busy === 's'} onClick={() => save({ ...(key.trim() && { apiKey: key.trim(), enabled: true }), monthlyBudget: Number(budget) || undefined, everyHours: Number(hours) || undefined })}>Save</Button>
+      </div>
+      <p className="text-xs text-muted">Used {p.usedThisMonth} / {p.monthlyBudget} this month · last search {p.lastRunAt ? relTime(p.lastRunAt) : 'never'}{p.lastRunAt && !p.lastError && ` · ${p.lastFoundCount} matching jobs`}
+        {p.hasKey && <button type="button" className="ml-2 text-danger underline" onClick={() => confirm(`Remove the ${p.label} key?`) && save({ apiKey: '', enabled: false }, 'Key removed')}>remove key</button>}</p>
+      {p.lastError && <p className="text-xs text-danger">Last error: {p.lastError}</p>}
+    </div>
+  );
+}
 
 const list = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 const clean = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v !== undefined)) as T;
@@ -20,13 +56,14 @@ const clean = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).f
 export default function AutoApplySettings() {
   const { data, error, isLoading, mutate } = useApi<Config>('/autoapply/config');
   const { data: presets } = useApi<Record<string, Prefs>>('/autoapply/presets');
+  const { data: providers } = useApi<Provider[]>('/autoapply/providers');
   const { data: tokens, mutate: mutateTokens } = useApi<{ id: string; label: string; createdAt: string; expiresAt: string }[]>('/autoapply/runner-tokens');
   const { busy, run } = useAction();
   const [p, setP] = useState<Record<string, string | boolean>>({});
   const [s, setS] = useState<Standing | null>(null);
   const [g, setG] = useState({ autoSubmit: false, minShortlistScore: 60, minAutoApplyScore: 75, dailyApplyCap: 10, allowAiFreeText: true, discoveryHours: 12 });
   const [newToken, setNewToken] = useState('');
-  const fillPrefs = (x: Prefs) => setP({ titles: x.titles.join(', '), locations: x.locations.join(', '), keywords: x.keywords.join(', '), excludeKeywords: x.excludeKeywords.join(', '), languages: x.languages.join(', '), minSalary: x.minSalary ? String(x.minSalary) : '', salaryCurrency: x.salaryCurrency ?? '', salaryPeriod: x.salaryPeriod ?? 'month', remoteOk: x.remoteOk, maxAgeDays: String(x.maxAgeDays) });
+  const fillPrefs = (x: Prefs) => setP({ titles: x.titles.join(', '), locations: x.locations.join(', '), keywords: x.keywords.join(', '), excludeKeywords: x.excludeKeywords.join(', '), languages: x.languages.join(', '), minSalary: x.minSalary ? String(x.minSalary) : '', salaryCurrency: x.salaryCurrency ?? '', salaryPeriod: x.salaryPeriod ?? 'month', remoteOk: x.remoteOk, maxAgeDays: String(x.maxAgeDays), searchLocations: x.searchLocations.join(', '), searchCountry: x.searchCountry, sites: x.sites.join(','), maxSearchQueries: String(x.maxSearchQueries) });
   useEffect(() => {
     if (!data) return;
     fillPrefs(data.preferences);
@@ -39,7 +76,8 @@ export default function AutoApplySettings() {
   const save = async () => {
     const preferences = {
       titles: list(String(p.titles)), locations: list(String(p.locations)), keywords: list(String(p.keywords)), excludeKeywords: list(String(p.excludeKeywords)), languages: list(String(p.languages)),
-      remoteOk: !!p.remoteOk, maxAgeDays: Number(p.maxAgeDays) || 45, ...(p.minSalary ? { minSalary: Number(p.minSalary), salaryCurrency: String(p.salaryCurrency).toUpperCase(), salaryPeriod: p.salaryPeriod } : {}),
+      remoteOk: !!p.remoteOk, maxAgeDays: Number(p.maxAgeDays) || 45,
+      searchLocations: list(String(p.searchLocations)), searchCountry: String(p.searchCountry || 'ae').toLowerCase(), sites: list(String(p.sites)), maxSearchQueries: Number(p.maxSearchQueries) || 6, ...(p.minSalary ? { minSalary: Number(p.minSalary), salaryCurrency: String(p.salaryCurrency).toUpperCase(), salaryPeriod: p.salaryPeriod } : {}),
     };
     const standingAnswers = { ...clean(s), custom: s.custom.filter((c) => c.match.trim() && c.answer.trim()) };
     const r = await run('save', () => api<{ rescored: number }>('/autoapply/config', { method: 'PUT', body: { preferences, standingAnswers, ...g } }));
@@ -88,6 +126,31 @@ export default function AutoApplySettings() {
       </Card>
 
       <Card>
+        <CardHeader title={<span className="flex items-center gap-2"><Globe className="h-4 w-4" />Where to search</span>} description="Jobs are found by your target titles × search locations, then scored and queued automatically. No company or URL needed." />
+        <div className="space-y-4 p-4">
+          <div className="grid gap-3 sm:grid-cols-[2fr_1fr_1fr]">
+            <Field label="Search in" hint="One search per title per place"><Input value={String(p.searchLocations ?? '')} onChange={(e) => setP({ ...p, searchLocations: e.target.value })} placeholder="Dubai, Abu Dhabi" /></Field>
+            <Field label="Country code" hint="ae, sa, gb, us…"><Input maxLength={2} value={String(p.searchCountry ?? 'ae')} onChange={(e) => setP({ ...p, searchCountry: e.target.value })} /></Field>
+            <Field label="Max searches per run" hint="titles × places, capped"><Input type="number" min={1} max={30} value={String(p.maxSearchQueries ?? '6')} onChange={(e) => setP({ ...p, maxSearchQueries: e.target.value })} /></Field>
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-medium text-muted">Apply through these sites (the best allowed link is picked per job: a supported company form first, then the careers page, then job boards)</p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
+              {SITES.map(([v, label]) => {
+                const on = String(p.sites ?? '').split(',').includes(v);
+                return <label key={v} className="flex items-center gap-1.5"><input type="checkbox" checked={on} onChange={(e) => { const cur = String(p.sites ?? '').split(',').filter(Boolean); setP({ ...p, sites: (e.target.checked ? [...cur, v] : cur.filter((x) => x !== v)).join(',') }); }} />{label}</label>;
+              })}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-muted">Search providers (keys are stored encrypted and never shown again)</p>
+            {providers?.map((x) => <ProviderRow key={`${x.type}${x.hasKey}${x.monthlyBudget}${x.everyHours}`} p={x} />)}
+            <p className="text-xs text-muted">LinkedIn and Indeed have no public job-search API and forbid crawling: their jobs come through Google Jobs, or paste their alert emails on Discover. Company boards you follow closely can still be added under Sources.</p>
+          </div>
+        </div>
+      </Card>
+
+      <Card>
         <CardHeader title="Standing answers" description="The ONLY source for factual and sensitive form answers. Leave blank to be asked per job; nothing is ever guessed." />
         <div className="grid gap-3 p-4 sm:grid-cols-3">
           <Field label="Full name (as on applications)"><Input value={s.fullName ?? ''} onChange={setStanding('fullName')} /></Field>
@@ -101,6 +164,9 @@ export default function AutoApplySettings() {
           <Field label="Salary expectation (exact wording)"><Input value={s.salaryExpectation ?? ''} onChange={setStanding('salaryExpectation')} placeholder="AED 20,000 per month" /></Field>
           <Field label="Work authorisation answer"><Input value={s.workAuthorization ?? ''} onChange={setStanding('workAuthorization')} placeholder="Yes" /></Field>
           <Field label="Need visa sponsorship?"><Select value={s.requiresSponsorship ?? ''} onChange={setStanding('requiresSponsorship')}><option value="">Ask me per job</option><option value="no">No</option><option value="yes">Yes</option></Select></Field>
+          <Field label="Highest education" hint="Empty: taken from your CV"><Input value={s.educationLevel ?? ''} onChange={setStanding('educationLevel')} placeholder="Bachelor's degree" /></Field>
+          <Field label="Languages you speak"><Input value={s.languages ?? ''} onChange={setStanding('languages')} placeholder="English, Arabic" /></Field>
+          <Field label="Current employment status" hint="Empty: taken from your CV"><Input value={s.employmentStatus ?? ''} onChange={setStanding('employmentStatus')} placeholder="Employed" /></Field>
           <Field label="Willing to relocate?"><Select value={s.willingToRelocate ?? ''} onChange={setStanding('willingToRelocate')}><option value="">Ask me per job</option><option value="yes">Yes</option><option value="no">No</option></Select></Field>
         </div>
         <div className="space-y-2 border-t border-border p-4 text-sm">

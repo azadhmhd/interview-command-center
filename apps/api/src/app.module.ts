@@ -6,6 +6,10 @@ import { AutoApplyController } from './autoapply/autoapply.controller';
 import { AutoApplyService } from './autoapply/autoapply.service';
 import { AgentPackages } from './agents/packages';
 import { ApplicationsController } from './applications/applications';
+import { ResumeDraftsController } from './builder/builder';
+import { CodingController } from './coding/coding';
+import { ResumeJobs } from './builder/jobs';
+import { PdfRenderer } from './builder/pdf';
 import { AuthController, AuthService } from './auth/auth';
 import { AuditService } from './common/audit.service';
 import { PrismaErrorFilter } from './common/errors';
@@ -32,7 +36,7 @@ import { WorkspaceAccess, WorkspacesController } from './workspaces/workspaces';
 /** Services shared by the API and the worker. */
 export const CORE_PROVIDERS = [
   PrismaService, AuditService, LlmService, QueueService, TasksService, TaskDefinitions, TaskRunner, AgentPackages,
-  CoursesService, KnowledgeService, SchedulerService, TickService, WorkspaceAccess, AutoApplyService,
+  CoursesService, KnowledgeService, SchedulerService, TickService, WorkspaceAccess, AutoApplyService, PdfRenderer, ResumeJobs,
 ];
 
 @Module({ providers: CORE_PROVIDERS, exports: CORE_PROVIDERS })
@@ -43,6 +47,7 @@ export class CoreModule {}
   controllers: [
     AuthController, WorkspacesController, SharesController, ProfileController, ApplicationsController, RoundsController,
     QuestionsController, CoursesController, PracticeController, LlmController, TasksController, DashboardController, AccountController, AutoApplyController,
+    ResumeDraftsController, CodingController,
   ],
   providers: [
     AuthService,

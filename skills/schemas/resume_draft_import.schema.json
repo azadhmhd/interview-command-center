@@ -1,0 +1,213 @@
+{
+  "$id": "icc/resume_draft_import",
+  "title": "resume_draft_import",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "header": {
+      "default": {
+        "fullName": "",
+        "headline": "",
+        "email": "",
+        "phone": "",
+        "location": "",
+        "links": []
+      },
+      "type": "object",
+      "properties": {
+        "fullName": {
+          "default": "",
+          "type": "string",
+          "maxLength": 120
+        },
+        "headline": {
+          "default": "",
+          "type": "string",
+          "maxLength": 300
+        },
+        "email": {
+          "default": "",
+          "type": "string",
+          "maxLength": 200
+        },
+        "phone": {
+          "default": "",
+          "type": "string",
+          "maxLength": 60
+        },
+        "location": {
+          "default": "",
+          "type": "string",
+          "maxLength": 120
+        },
+        "links": {
+          "default": [],
+          "description": "LinkedIn, GitHub, website… in the order shown",
+          "maxItems": 10,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "default": "",
+                "description": "text shown, e.g. \"janedoe\"",
+                "type": "string",
+                "maxLength": 120
+              },
+              "url": {
+                "default": "",
+                "description": "full URL, e.g. https://linkedin.com/in/janedoe",
+                "type": "string",
+                "maxLength": 500
+              }
+            }
+          }
+        }
+      }
+    },
+    "sections": {
+      "default": [],
+      "description": "in the order they appear",
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "leave empty; the app assigns ids",
+            "type": "string",
+            "maxLength": 40
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "skills",
+              "experience",
+              "education",
+              "projects",
+              "certificates",
+              "languages",
+              "custom"
+            ]
+          },
+          "title": {
+            "default": "",
+            "description": "heading as written in the CV; empty = no heading (common for the summary)",
+            "type": "string",
+            "maxLength": 80
+          },
+          "hidden": {
+            "default": false,
+            "type": "boolean"
+          },
+          "text": {
+            "default": "",
+            "description": "summary / custom section paragraph",
+            "type": "string",
+            "maxLength": 8000
+          },
+          "groups": {
+            "default": [],
+            "description": "skills only: one group per labelled skills line",
+            "maxItems": 30,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "leave empty; the app assigns ids",
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "label": {
+                  "default": "",
+                  "description": "e.g. \"Backend & Languages\"",
+                  "type": "string",
+                  "maxLength": 120
+                },
+                "items": {
+                  "default": [],
+                  "maxItems": 80,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 120
+                  }
+                }
+              }
+            }
+          },
+          "entries": {
+            "default": [],
+            "maxItems": 60,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "description": "leave empty; the app assigns ids",
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "title": {
+                  "default": "",
+                  "description": "job title, degree, project or certificate name",
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "subtitle": {
+                  "default": "",
+                  "description": "employer, school or issuer",
+                  "type": "string",
+                  "maxLength": 300
+                },
+                "start": {
+                  "default": "",
+                  "description": "as written, e.g. \"2019\"",
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "end": {
+                  "default": "",
+                  "description": "as written, e.g. \"2023\" or \"Present\"; for certificates the date earned",
+                  "type": "string",
+                  "maxLength": 40
+                },
+                "location": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 120
+                },
+                "url": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 500
+                },
+                "description": {
+                  "default": "",
+                  "description": "one short paragraph shown under the title (certificates, projects)",
+                  "type": "string",
+                  "maxLength": 3000
+                },
+                "bullets": {
+                  "default": [],
+                  "description": "one achievement per item, without the bullet character",
+                  "maxItems": 40,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      }
+    }
+  }
+}

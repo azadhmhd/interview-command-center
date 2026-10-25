@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LeadStatusBadge, ScoreBadge } from '@/components/auto-apply-bits';
+import { JobResumes } from '@/components/resume/job-resumes';
 import { Badge, Button, Card, CardHeader, Dialog, ErrorBox, Field, Input, Loading, PageHeader, Progress, Select, StateBadge, Textarea, useAction } from '@/components/ui';
 import { api, refresh, useApi } from '@/lib/api';
 import { ATS_LABEL, KitAnswer, LeadStatus, salary } from '@/lib/autoapply';
@@ -17,6 +18,7 @@ interface Lead {
   description: string; canonicalUrl: string; applyUrl?: string; atsType: string; discoveredVia: string[]; publishedAt?: string; discoveredAt: string; seenCount: number;
   salaryMin?: number; salaryMax?: number; salaryCurrency?: string; salaryPeriod?: string; trackerApplicationId?: string; automatable: boolean; duplicate?: string | null;
   resume?: { id: string; label: string; version: number; fileName: string } | null;
+  atsScore?: number | null; atsMissing?: string[]; atsStage?: 'none' | 'tailoring' | 'ready';
   attempts: { id: string; attemptNo: number; method: string; status: string; error?: string; evidence?: { confirmationUrl?: string; confirmationText?: string; screenshot?: string; note?: string } | null; missingFields: string[]; startedAt: string; finishedAt?: string }[];
   recruiters: { id: string; name?: string; email?: string; title?: string }[];
   tasks: { id: string; type: string; state: string; routingReason?: string }[];
@@ -67,8 +69,8 @@ export default function LeadPage() {
         {can('EVALUATED', 'SKIPPED') && <Button variant="outline" onClick={() => status('SHORTLISTED')}>Shortlist</Button>}
         {can('SHORTLISTED', 'EVALUATED') && <Button variant="outline" loading={busy === 'prep'} onClick={() => post('prep', `/autoapply/leads/${id}/prepare`, 'Apply kit prepared')}>Prepare apply kit</Button>}
         {can('EVALUATED', 'SHORTLISTED', 'READY_FOR_REVIEW', 'NEEDS_ATTENTION') && !clickedBefore && <Button loading={busy === 'APPROVED'} onClick={() => status('APPROVED')}><Send className="h-4 w-4" />Approve to apply</Button>}
-        {can('APPROVED') && <Button variant="outline" onClick={() => status('READY_FOR_REVIEW')}>Unapprove</Button>}
         {can('APPROVED', 'NEEDS_ATTENTION', 'READY_FOR_REVIEW') && <Button variant="outline" loading={busy === 'agent'} onClick={async () => { const t = await post('agent', `/autoapply/leads/${id}/agent-task`, 'Agent task created') as { id: string } | undefined; if (t) router.push(`/tasks/${t.id}`); }}><Bot className="h-4 w-4" />Apply with Claude Code</Button>}
+        {can('APPROVED') && <Button variant="outline" onClick={() => status('READY_FOR_REVIEW')}>Unapprove</Button>}
         {can('APPROVED', 'NEEDS_ATTENTION', 'READY_FOR_REVIEW', 'APPLYING') && <Button variant="outline" onClick={() => setSubmitOpen(true)}><CheckCircle2 className="h-4 w-4" />I applied: mark submitted</Button>}
         {can('SUBMITTED') && <><Button variant="outline" onClick={() => status('INTERVIEW')}>Got an interview</Button><Button variant="outline" onClick={() => status('REJECTED')}>Rejected</Button></>}
         {can('SUBMITTED', 'INTERVIEW', 'NEEDS_ATTENTION') && <Button variant="ghost" onClick={() => status('WITHDRAWN')}>Withdraw</Button>}
@@ -136,6 +138,17 @@ export default function LeadPage() {
         </div>
 
         <div className="space-y-4">
+          <JobResumes jobLeadId={l.id} />
+          {(l.atsScore != null || l.atsStage === 'tailoring') && (
+            <Card>
+              <CardHeader title={`ATS match${l.atsScore != null ? ` · ${l.atsScore}/100` : ''}`}
+                description={l.atsStage === 'tailoring' ? 'Below 85: a tailored CV is being made for this job before applying.' : l.atsScore != null && l.atsScore >= 85 ? 'The attached CV covers this job\'s keywords.' : 'Keywords of this job the attached CV does not mention. Tailoring only rewords what your CV already has.'} />
+              <div className="space-y-2 p-4">
+                <Progress value={l.atsScore ?? 0} />
+                {!!l.atsMissing?.length && <div className="flex flex-wrap gap-1">{l.atsMissing.map((k) => <Badge key={k} tone="warning">{k}</Badge>)}</div>}
+              </div>
+            </Card>
+          )}
           <Card>
             <CardHeader title="Why this score" />
             <div className="space-y-3 p-4">

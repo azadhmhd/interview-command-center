@@ -1,16 +1,17 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, Get, HttpCode, NotFoundException, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { JobLeadStatus, JobSourceType, Prisma } from '@prisma/client';
+import { JobLeadStatus, JobSource, JobSourceType, Prisma } from '@prisma/client';
 import type { Response } from 'express';
 import { readFile } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { AuditService } from '../common/audit.service';
+import { encrypt } from '../common/crypto';
 import { ApiZod, Ctx, CurrentCtx, optStr, zp } from '../common/http';
 import { config } from '../config';
 import { PrismaService } from '../prisma.service';
 import { TasksService } from '../tasks/tasks.service';
-import { AutoApplyService, evidenceSchema } from './autoapply.service';
+import { AutoApplyService, evidenceSchema, isProvider, ProviderConfig, PROVIDERS, ProviderType } from './autoapply.service';
 import { standingAnswersSchema } from './kit';
 import { ADAPTERS, importFromUrl, SourceError } from './sources';
 import { AUTOMATABLE_ATS, preferencesSchema, PRESETS } from './state';
@@ -31,6 +32,25 @@ const sourceSchema = z.object({
   config: z.object({ board: z.string().min(1).max(100), company: z.string().max(200).optional(), baseUrl: z.string().url().optional() }),
   enabled: z.boolean().default(true),
 });
+const providerSchema = z.object({
+  /** '' removes the key; omitted keeps it */
+  apiKey: z.string().max(500).optional(),
+  enabled: z.boolean().optional(),
+  monthlyBudget: z.number().int().min(1).max(100_000).optional(),
+  everyHours: z.number().int().min(1).max(168).optional(),
+  baseUrl: z.string().url().optional(),
+});
+/** under the web proxy's 30 s timeout (env override for tests) */
+const RUN_WAIT_MS = Number(process.env.AUTOAPPLY_RUN_WAIT_MS ?? 20_000);
+const BOARD_TYPES = ['GREENHOUSE', 'LEVER', 'ASHBY', 'SMARTRECRUITERS', 'WORKABLE'] as JobSourceType[];
+
+/** Never send provider API keys to the browser. */
+function redact<T extends JobSource>(s: T) {
+  if (!isProvider(s.type)) return s;
+  const { apiKeyEnc, ...config } = s.config as ProviderConfig;
+  return { ...s, config: { ...config, hasKey: !!apiKeyEnc } };
+}
+
 const statusSchema = z.object({ status: z.enum(['EVALUATED', 'SHORTLISTED', 'READY_FOR_REVIEW', 'APPROVED', 'INTERVIEW', 'REJECTED', 'WITHDRAWN', 'NEEDS_ATTENTION', 'SKIPPED']), reason: optStr(500), verifiedNotSubmitted: z.boolean().default(false) });
 const kitSchema = z.object({ answers: z.record(z.string(), z.string().max(5000)).optional(), coverNote: z.string().max(10000).optional(), resumeId: z.string().optional() });
 const urlSchema = z.object({ url: z.string().url().max(2000) });
@@ -44,8 +64,11 @@ const resultSchema = z.object({
   status: z.enum(['SUBMITTED', 'BLOCKED', 'NEEDS_ATTENTION', 'FAILED']), evidence: evidenceSchema.optional(),
   filledFields: z.array(z.object({ label: z.string().max(500), value: z.string().max(5000).optional(), source: z.string().max(40).optional() })).max(200).optional(),
   missingFields: z.array(z.string().max(500)).max(200).optional(), error: optStr(2000),
+  /** the claude engine records the intent before it starts; false = it never clicked Submit, so the attempt is not a possible submission */
+  submitClicked: z.boolean().optional(),
 });
-const claimSchema = z.object({ runner: z.string().min(1).max(100) });
+/** engine claude: Claude Code in the user's own browser, which can apply on any site; playwright only on the supported ATS forms */
+const claimSchema = z.object({ runner: z.string().min(1).max(100), engine: z.enum(['playwright', 'claude']).default('playwright') });
 const tokenSchema = z.object({ label: z.string().min(1).max(60).default('apply-runner') });
 
 const csv = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -59,7 +82,7 @@ export class AutoApplyController {
   async overview(@CurrentCtx() ctx: Ctx) {
     const [byStatus, sources, cfg, today, needs] = await Promise.all([
       this.prisma.jobLead.groupBy({ by: ['status'], where: { workspaceId: ctx.workspaceId }, _count: true }),
-      this.prisma.jobSource.findMany({ where: { workspaceId: ctx.workspaceId }, orderBy: { name: 'asc' } }),
+      this.prisma.jobSource.findMany({ where: { workspaceId: ctx.workspaceId }, orderBy: { name: 'asc' } }).then((r) => r.map(redact)),
       this.svc.config(ctx.workspaceId),
       this.prisma.applyAttempt.count({ where: { workspaceId: ctx.workspaceId, status: 'SUBMITTED', finishedAt: { gte: new Date(Date.now() - 864e5) } } }),
       this.prisma.jobLead.findMany({ where: { workspaceId: ctx.workspaceId, status: 'NEEDS_ATTENTION' }, select: { id: true, title: true, company: true, statusReason: true }, take: 10, orderBy: { updatedAt: 'desc' } }),
@@ -92,8 +115,41 @@ export class AutoApplyController {
 
   // ── sources ──
   @Get('sources')
-  sources(@CurrentCtx() ctx: Ctx) {
-    return this.prisma.jobSource.findMany({ where: { workspaceId: ctx.workspaceId }, orderBy: { createdAt: 'asc' }, include: { _count: { select: { leads: true } } } });
+  async sources(@CurrentCtx() ctx: Ctx) {
+    const rows = await this.prisma.jobSource.findMany({ where: { workspaceId: ctx.workspaceId }, orderBy: { createdAt: 'asc' }, include: { _count: { select: { leads: true } } } });
+    return rows.map(redact);
+  }
+
+  // ── search providers (role-based discovery) ──
+  @Get('providers')
+  async providers(@CurrentCtx() ctx: Ctx) {
+    const rows = await this.prisma.jobSource.findMany({ where: { workspaceId: ctx.workspaceId, type: { in: Object.keys(PROVIDERS) as JobSourceType[] } } });
+    const month = new Date().toISOString().slice(0, 7);
+    return (Object.keys(PROVIDERS) as ProviderType[]).map((type) => {
+      const row = rows.find((r) => r.type === type);
+      const c = (row?.config ?? {}) as ProviderConfig;
+      return {
+        type, label: PROVIDERS[type].label, id: row?.id ?? null, enabled: row?.enabled ?? false, hasKey: !!c.apiKeyEnc, apiKeyLast4: c.apiKeyLast4 ?? null,
+        monthlyBudget: c.monthlyBudget ?? PROVIDERS[type].monthlyBudget, usedThisMonth: c.month === month ? (c.used ?? 0) : 0, everyHours: c.everyHours ?? 24,
+        lastRunAt: row?.lastRunAt ?? null, lastSuccessAt: row?.lastSuccessAt ?? null, lastError: row?.lastError ?? null, lastFoundCount: row?.lastFoundCount ?? 0,
+      };
+    });
+  }
+
+  @Put('providers/:type') @ApiZod(providerSchema)
+  async saveProvider(@CurrentCtx() ctx: Ctx, @Param('type') type: string, @Body(zp(providerSchema)) body: z.infer<typeof providerSchema>) {
+    if (!isProvider(type)) throw new NotFoundException();
+    if (body.baseUrl && process.env.AUTOAPPLY_ALLOW_CUSTOM_BASE_URL !== 'true') throw new BadRequestException('Custom API hosts are disabled');
+    const where = { workspaceId_type_name: { workspaceId: ctx.workspaceId, type: type as JobSourceType, name: PROVIDERS[type].label } };
+    const row = await this.prisma.jobSource.findUnique({ where });
+    const prev = (row?.config ?? {}) as ProviderConfig;
+    const key = body.apiKey === undefined ? {} : body.apiKey === '' ? { apiKeyEnc: undefined, apiKeyLast4: undefined } : { apiKeyEnc: encrypt(body.apiKey.trim()), apiKeyLast4: body.apiKey.trim().slice(-4) };
+    const cfg = { ...prev, ...key, ...(body.monthlyBudget && { monthlyBudget: body.monthlyBudget }), ...(body.everyHours && { everyHours: body.everyHours }), ...(body.baseUrl && { baseUrl: body.baseUrl }) };
+    const config = JSON.parse(JSON.stringify(cfg)) as Prisma.InputJsonValue; // drops cleared (undefined) keys
+    const enabled = body.enabled ?? row?.enabled ?? true;
+    await this.prisma.jobSource.upsert({ where, create: { ...where.workspaceId_type_name, config, enabled }, update: { config, enabled } });
+    await this.audit.record(ctx, 'autoapply.provider_saved', { type: 'job_source', id: type }, { enabled, keyChanged: body.apiKey !== undefined });
+    return (await this.providers(ctx)).find((p) => p.type === type);
   }
 
   @Post('sources') @ApiZod(sourceSchema)
@@ -109,7 +165,9 @@ export class AutoApplyController {
 
   @Patch('sources/:id') @ApiZod(sourceSchema.partial())
   async updateSource(@CurrentCtx() ctx: Ctx, @Param('id') id: string, @Body(zp(sourceSchema.partial())) body: Partial<z.infer<typeof sourceSchema>>) {
-    const r = await this.prisma.jobSource.updateMany({ where: { id, workspaceId: ctx.workspaceId }, data: { ...body, type: body.type as JobSourceType | undefined, config: body.config } });
+    // provider rows keep their (encrypted) config; only enabled/name may change through here
+    const boardOnly = body.config || body.type ? { type: { in: BOARD_TYPES } } : {};
+    const r = await this.prisma.jobSource.updateMany({ where: { id, workspaceId: ctx.workspaceId, ...boardOnly }, data: { ...body, type: body.type as JobSourceType | undefined, config: body.config } });
     if (!r.count) throw new NotFoundException();
     return { ok: true };
   }
@@ -125,8 +183,11 @@ export class AutoApplyController {
   async runSource(@CurrentCtx() ctx: Ctx, @Param('id') id: string) {
     const s = await this.prisma.jobSource.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
     if (!s) throw new NotFoundException();
-    if (!ADAPTERS[s.type]) throw new BadRequestException('This source type is import-only');
-    const r = await this.svc.runSource(s);
+    if (!ADAPTERS[s.type] && !isProvider(s.type)) throw new BadRequestException('This source type is import-only');
+    if (s.leaseUntil && s.leaseUntil > new Date()) throw new ConflictException('A scan of this source is already running');
+    // answer within the web proxy's timeout; a long search keeps running and its jobs appear as they are scored
+    const r = await Promise.race([this.svc.runSource(s), new Promise<null>((ok) => setTimeout(() => ok(null), RUN_WAIT_MS).unref())]);
+    if (!r) return { found: 0, created: 0, running: true };
     if (r.skipped) throw new ConflictException('A scan of this source is already running');
     return r;
   }
@@ -264,8 +325,8 @@ export class AutoApplyController {
 
   // ── apply runner protocol ──
   @Post('runner/claim') @HttpCode(200) @ApiZod(claimSchema)
-  claim(@CurrentCtx() ctx: Ctx, @Body(zp(claimSchema)) body: { runner: string }) {
-    return this.svc.claim(ctx, body.runner);
+  claim(@CurrentCtx() ctx: Ctx, @Body(zp(claimSchema)) body: z.infer<typeof claimSchema>) {
+    return this.svc.claim(ctx, body.runner, body.engine);
   }
 
   @Post('runner/attempts/:id/heartbeat') @HttpCode(200)

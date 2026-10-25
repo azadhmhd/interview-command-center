@@ -1,7 +1,6 @@
 'use client';
 import {
-  BarChart3, Bot, Briefcase, CalendarClock, GraduationCap, LayoutDashboard, Library, LogOut, Menu, MessageSquarePlus,
-  Mic, Radar, Repeat, Rocket, Send, Settings, Share2, SlidersHorizontal, Sparkles, Target, User, Users, X,
+  BarChart3, Bot, Briefcase, CalendarClock, Code2, FileText, GraduationCap, LayoutDashboard, Library, LogOut, Menu, MessageSquarePlus, Mic, Radar, Repeat, Rocket, Satellite, Send, Settings, Share2, SlidersHorizontal, Sparkles, Target, User, Users, X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -16,15 +15,18 @@ const NAV = [
   { group: 'Track', items: [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/applications', label: 'Applications', icon: Briefcase },
+    { href: '/resumes', label: 'Resume builder', icon: FileText },
     { href: '/interviews', label: 'Interview timeline', icon: CalendarClock },
   ] },
   { group: 'Prepare', items: [
     { href: '/courses', label: 'Preparation courses', icon: GraduationCap },
     { href: '/mock', label: 'Mock interviews', icon: Mic },
+    { href: '/coding', label: 'Coding practice', icon: Code2 },
     { href: '/questions', label: 'Question library', icon: Library },
     { href: '/revision', label: 'Revision queue', icon: Repeat },
   ] },
   { group: 'Auto Apply', items: [
+    { href: '/auto-apply/mission', label: 'Mission control', icon: Satellite },
     { href: '/auto-apply', label: 'Discover jobs', icon: Radar, exact: true },
     { href: '/auto-apply/queue', label: 'Apply queue', icon: Send },
     { href: '/auto-apply/sources', label: 'Job sources', icon: Rocket },
@@ -53,8 +55,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const ws = me?.workspaceId ?? getWorkspace();
 
   const nav = (
-    <nav className="flex h-full flex-col gap-4 overflow-y-auto p-3" aria-label="Main">
-      <div className="flex items-center gap-2 px-2 pt-1">
+    // logo, workspace and Quick capture stay put; only the links scroll when they are taller than the screen
+    <nav className="flex h-full flex-col gap-4 p-3" aria-label="Main">
+      <div className="flex shrink-0 items-center gap-2 px-2 pt-1">
         <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-accent text-accent-fg"><Target className="h-4 w-4" /></span>
         <span className="text-sm font-semibold leading-tight">Interview<br />Command Center</span>
       </div>
@@ -63,7 +66,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
           {me.workspaces.map((w) => <option key={w.id} value={w.id}>{w.personal ? 'Personal' : w.name} ({w.role.toLowerCase()})</option>)}
         </Select>
       )}
-      <Button onClick={() => setCapture(true)} className="w-full justify-start"><MessageSquarePlus className="h-4 w-4" />Quick capture</Button>
+      <Button onClick={() => setCapture(true)} className="w-full shrink-0 justify-start"><MessageSquarePlus className="h-4 w-4" />Quick capture</Button>
+      <div className="-mx-1 min-h-0 flex-1 space-y-4 overflow-y-auto px-1 [scrollbar-width:thin]">
       {NAV.map((g) => (
         <div key={g.group}>
           <p className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted">{g.group}</p>
@@ -79,7 +83,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
           })}
         </div>
       ))}
-      <div className="mt-auto border-t border-border pt-3">
+      </div>
+      <div className="shrink-0 border-t border-border pt-3">
         <p className="truncate px-2 text-xs font-medium">{me?.user.name}</p>
         <p className="truncate px-2 text-xs text-muted">{me?.user.email}</p>
         <Button variant="ghost" size="sm" className="mt-1 w-full justify-start" onClick={async () => { await api('/auth/logout', { method: 'POST' }); setWorkspace(''); router.push('/login'); }}>

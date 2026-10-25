@@ -5,7 +5,7 @@ import { resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { dedupeKey } from '../applications/applications';
 import { AuditService } from '../common/audit.service';
-import { newToken, sha256 } from '../common/crypto';
+import { decrypt, newToken, sha256 } from '../common/crypto';
 import type { Ctx } from '../common/http';
 import { config } from '../config';
 import { LlmService } from '../llm/llm.service';
@@ -13,13 +13,21 @@ import { detectTech } from '../profile/profile';
 import { PrismaService } from '../prisma.service';
 import { TasksService } from '../tasks/tasks.service';
 import { ApplyKit, buildKit, KitAnswer, standardQuestionsFor, standingAnswersSchema, StandingAnswers } from './kit';
-import { CandidateFacts, DEFAULT_PREFERENCES, Preferences, scoreJob, selectResume } from './matching';
+import { CandidateFacts, scoreJob, selectResume } from './matching';
+import { buildQueries, SEARCH, SearchHit } from './search';
 import { ADAPTERS, fetchQuestions, NormalizedJob, parseAlertEmail, SourceError } from './sources';
 import { AUTOMATABLE_ATS, canMove, preferencesSchema, RESCORABLE } from './state';
 
 type Owner = Pick<Ctx, 'workspaceId'> & { userId?: string };
 
 const LEASE_MS = 10 * 60_000;
+
+/** Search providers (role-based discovery). Stored as JobSource rows; the API key is encrypted inside config. */
+export const PROVIDERS = { GOOGLE_JOBS: { label: 'Google Jobs (SerpApi)', monthlyBudget: 250 }, JOOBLE: { label: 'Jooble', monthlyBudget: 500 } } as const;
+export type ProviderType = keyof typeof PROVIDERS;
+export const isProvider = (t: string): t is ProviderType => t in PROVIDERS;
+export interface ProviderConfig { apiKeyEnc?: string; apiKeyLast4?: string; monthlyBudget?: number; everyHours?: number; month?: string; used?: number; baseUrl?: string }
+const DEFAULT_PROVIDER_HOURS = 24;
 const ATTEMPT_LEASE_MS = 15 * 60_000;
 const MAX_APPLY_ATTEMPTS = 3;
 const CONFIRM_TEXT = /\b(thank(s| you)|application (has been |was )?(received|submitted|sent)|we('ve| have) received|successfully (submitted|applied)|submission (received|complete))\b/i;
@@ -45,6 +53,9 @@ export function verifyEvidence(e: Evidence | undefined, manual = false): { ok: b
   return { ok: false, reason: 'No confirmation page detected after submit' };
 }
 
+const betterApply = (have: string, found: string) =>
+  !AUTOMATABLE_ATS.includes(have) && found !== 'other' && (AUTOMATABLE_ATS.includes(found) || have === 'other');
+
 @Injectable()
 export class AutoApplyService {
   private log = new Logger('AutoApply');
@@ -58,7 +69,7 @@ export class AutoApplyService {
     const standing = standingAnswersSchema.safeParse(row.standingAnswers);
     return {
       ...row,
-      preferences: (prefs.success ? prefs.data : DEFAULT_PREFERENCES) as Preferences,
+      preferences: prefs.success ? prefs.data : preferencesSchema.parse({}),
       standingAnswers: (standing.success ? standing.data : standingAnswersSchema.parse({})) as StandingAnswers,
     };
   }
@@ -87,12 +98,12 @@ export class AutoApplyService {
     if (!leased.count) return { found: 0, created: 0, skipped: true };
     try {
       const adapter = ADAPTERS[source.type];
-      if (!adapter) throw new SourceError(`${source.type} sources are import-only`, false);
-      const jobs = await adapter(source.config as unknown as { board: string; company?: string; baseUrl?: string });
+      if (!adapter && !isProvider(source.type)) throw new SourceError(`${source.type} sources are import-only`, false);
+      const jobs: (NormalizedJob & Partial<SearchHit>)[] = adapter ? await adapter(source.config as unknown as { board: string; company?: string; baseUrl?: string }) : await this.search(source);
       let created = 0;
       for (const job of jobs) {
         try {
-          if ((await this.ingest({ workspaceId: source.workspaceId }, job, source.name, source.type, source.id)).created) created++;
+          if ((await this.ingest({ workspaceId: source.workspaceId }, job, job.viaLabel ?? source.name, source.type, source.id)).created) created++;
         } catch (e) {
           this.log.warn(`ingest failed (${source.name}): ${(e as Error).message}`);
         }
@@ -104,6 +115,38 @@ export class AutoApplyService {
       await this.prisma.jobSource.update({ where: { id: source.id }, data: { lastError: msg, leaseUntil: null } });
       return { found: 0, created: 0, error: msg };
     }
+  }
+
+  /** Role × location queries against a search provider, within the monthly search budget. */
+  private async search(source: JobSource): Promise<SearchHit[]> {
+    const type = source.type as ProviderType;
+    const c = source.config as ProviderConfig;
+    if (!c.apiKeyEnc) throw new SourceError('Add an API key in Auto Apply → Settings → Where to search', false);
+    const [cfg, facts] = await Promise.all([this.config(source.workspaceId), this.facts(source.workspaceId)]);
+    const queries = buildQueries(cfg.preferences, facts.targetRoles);
+    if (!queries.length) throw new SourceError('Add the job titles you want in Auto Apply settings', false);
+    const budget = c.monthlyBudget ?? PROVIDERS[type].monthlyBudget;
+    const month = new Date().toISOString().slice(0, 7);
+    let used = c.month === month ? (c.used ?? 0) : 0;
+    if (used >= budget) throw new SourceError(`Monthly budget of ${budget} searches used; it resets on the 1st`, false);
+    const apiKey = decrypt(c.apiKeyEnc);
+    const out: SearchHit[] = [];
+    let failure: Error | undefined;
+    for (const q of queries) {
+      if (used >= budget) break;
+      used++; // counted before the call: providers bill failed searches too
+      try {
+        out.push(...(await SEARCH[type]({ apiKey, baseUrl: c.baseUrl }, q, cfg.preferences.sites)));
+      } catch (e) {
+        failure = e as Error;
+        if (e instanceof SourceError && !e.retryable) break; // bad key: stop spending
+      }
+    }
+    // re-read so a key change made during the run is not overwritten
+    const fresh = await this.prisma.jobSource.findUnique({ where: { id: source.id } });
+    if (fresh) await this.prisma.jobSource.update({ where: { id: source.id }, data: { config: { ...(fresh.config as object), month, used } } });
+    if (failure && !out.length) throw failure;
+    return out;
   }
 
   /** Normalise + dedupe one job into a lead, then evaluate it. Re-discoveries update history, never duplicate. */
@@ -126,7 +169,8 @@ export class AutoApplyService {
           // fill gaps only; never overwrite what is already known
           ...Object.fromEntries(Object.entries(fields).filter(([k, v]) => v != null && (existing as Record<string, unknown>)[k] == null)),
           ...(!existing.description && job.description && { description: job.description }),
-          ...(existing.atsType === 'other' && job.atsType !== 'other' && { atsType: job.atsType, atsMeta: job.atsMeta as Prisma.InputJsonValue, applyUrl: job.applyUrl }),
+          // a better place to apply turned up (e.g. the same job found on its Greenhouse page after LinkedIn)
+          ...(betterApply(existing.atsType, job.atsType) && { atsType: job.atsType, atsMeta: job.atsMeta as Prisma.InputJsonValue, applyUrl: job.applyUrl }),
         },
       });
     } else {
@@ -194,7 +238,7 @@ export class AutoApplyService {
     const kit = buildKit({
       title: lead.title, company: lead.company, sourceLabel: lead.discoveredVia[0] ?? 'Company careers page', questions: questions ?? standardQuestionsFor(lead.atsType),
       account: { name: user?.name ?? '', email: user?.email ?? '' }, profile: facts.profile ?? {}, standing: cfg.standingAnswers,
-      matchedSkills: ((lead.fitBreakdown as { matchedSkills?: string[] } | null)?.matchedSkills) ?? [], resumeLabel: resume ? `${resume.label} v${resume.version} (${resume.fileName})` : undefined,
+      matchedSkills: ((lead.fitBreakdown as { matchedSkills?: string[] } | null)?.matchedSkills) ?? [], resumeLabel: resume ? `${resume.label} v${resume.version} (${resume.fileName})` : undefined, resumeText: resume?.extractedText ?? undefined,
       allowAiFreeText: cfg.allowAiFreeText, aiAnswers: prev?.aiAnswers, aiCoverNote: edits?.coverNote ?? prev?.aiCoverNote,
     });
     // the user's own edits win over everything else
@@ -330,11 +374,12 @@ export class AutoApplyService {
 
   // ───────────── apply runner protocol ─────────────
 
-  /** Claim the best approved, automatable job. Conditional update = only one runner can claim a job. */
-  async claim(ctx: Ctx, runner: string) {
+  /** Claim the best approved job it can apply to (Playwright: supported ATS forms only). Conditional update = only one runner can claim a job. */
+  async claim(ctx: Ctx, runner: string, engine: 'playwright' | 'claude' = 'playwright') {
     const cfg = await this.config(ctx.workspaceId);
     const candidates = await this.prisma.jobLead.findMany({
-      where: { workspaceId: ctx.workspaceId, status: 'APPROVED', atsType: { in: AUTOMATABLE_ATS }, applyUrl: { not: null } },
+      // atsStage ready: the ATS check (and tailoring, when the CV scored below ATS_MIN) is done
+      where: { workspaceId: ctx.workspaceId, status: 'APPROVED', atsStage: 'ready', ...(engine === 'playwright' && { atsType: { in: AUTOMATABLE_ATS } }), applyUrl: { not: null } },
       orderBy: [{ fitScore: { sort: 'desc', nulls: 'last' } }, { updatedAt: 'asc' }], take: 20,
     });
     for (const lead of candidates) {
@@ -382,7 +427,7 @@ export class AutoApplyService {
     return r.count ? { ok: true } : { ok: false, reason: 'Attempt changed concurrently' };
   }
 
-  async reportResult(ctx: Ctx, id: string, body: { status: 'SUBMITTED' | 'BLOCKED' | 'NEEDS_ATTENTION' | 'FAILED'; evidence?: Evidence; filledFields?: unknown; missingFields?: string[]; error?: string }) {
+  async reportResult(ctx: Ctx, id: string, body: { status: 'SUBMITTED' | 'BLOCKED' | 'NEEDS_ATTENTION' | 'FAILED'; evidence?: Evidence; filledFields?: unknown; missingFields?: string[]; error?: string; submitClicked?: boolean }) {
     const a = await this.attempt(ctx, id);
     if (!['RUNNING', 'SUBMIT_CLICKED'].includes(a.status)) throw new ConflictException(`Attempt already finished (${a.status})`);
     let status: ApplyAttemptStatus = body.status;
@@ -402,16 +447,18 @@ export class AutoApplyService {
       if (a.status !== 'SUBMIT_CLICKED') { status = 'NEEDS_ATTENTION'; reason = 'Submit was reported without the submit-intent check'; }
       const v = verifyEvidence(body.evidence);
       if (!v.ok) { status = 'NEEDS_ATTENTION'; reason = `${v.reason}: open the job and confirm whether it went through`; }
-    } else if (a.status === 'SUBMIT_CLICKED' && status === 'FAILED') {
+    } else if (a.status === 'SUBMIT_CLICKED' && status === 'FAILED' && body.submitClicked !== false) {
       status = 'NEEDS_ATTENTION'; reason = `Error after clicking Submit (${body.error ?? 'unknown'}): verify manually; it will not be retried`;
     }
     const { screenshotBase64: _, ...evidence } = body.evidence ?? {};
+    // the runner says Submit was never clicked (claude engine: intent is recorded before it starts): not a possible submission
+    const neverClicked = body.submitClicked === false && status !== 'SUBMITTED' && a.status === 'SUBMIT_CLICKED';
     const retry = status === 'FAILED' && a.attemptNo < MAX_APPLY_ATTEMPTS;
     const leadStatus: JobLeadStatus = status === 'SUBMITTED' ? 'SUBMITTED' : retry ? 'APPROVED' : 'NEEDS_ATTENTION';
     await this.prisma.$transaction([
       this.prisma.applyAttempt.update({
         where: { id },
-        data: { status, error: reason?.slice(0, 2000), evidence: { ...evidence, ...(screenshot && { screenshot }) } as Prisma.InputJsonValue, filledFields: body.filledFields as Prisma.InputJsonValue, missingFields: body.missingFields ?? [], finishedAt: new Date(), leaseUntil: null },
+        data: { status, ...(neverClicked && { submitClickedAt: null }), error: reason?.slice(0, 2000), evidence: { ...evidence, ...(screenshot && { screenshot }) } as Prisma.InputJsonValue, filledFields: body.filledFields as Prisma.InputJsonValue, missingFields: body.missingFields ?? [], finishedAt: new Date(), leaseUntil: null },
       }),
       this.prisma.jobLead.update({
         where: { id: a.leadId },
@@ -436,10 +483,11 @@ export class AutoApplyService {
 
   /** Worker tick: sources due for a scan (per workspace interval). */
   async discoverDue(now = new Date()) {
-    const sources = await this.prisma.jobSource.findMany({ where: { enabled: true, type: { in: Object.keys(ADAPTERS) as JobSourceType[] } }, include: { workspace: { include: { autoApplyConfig: true } } }, take: 100 });
+    const types = [...Object.keys(ADAPTERS), ...Object.keys(PROVIDERS)] as JobSourceType[];
+    const sources = await this.prisma.jobSource.findMany({ where: { enabled: true, type: { in: types } }, include: { workspace: { include: { autoApplyConfig: true } } }, take: 100 });
     let ran = 0;
     for (const s of sources) {
-      const hours = s.workspace.autoApplyConfig?.discoveryHours ?? 12;
+      const hours = isProvider(s.type) ? ((s.config as ProviderConfig).everyHours ?? DEFAULT_PROVIDER_HOURS) : (s.workspace.autoApplyConfig?.discoveryHours ?? 12);
       if (s.lastRunAt && now.getTime() - s.lastRunAt.getTime() < hours * 36e5) continue;
       await this.runSource(s);
       ran++;

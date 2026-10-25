@@ -32,7 +32,7 @@
   },
   "packageManager": "pnpm@10.6.2",
   "scripts": {
-    "infra:up": "docker compose up -d postgres redis",
+    "infra:up": "docker compose up -d postgres redis minio",
     "infra:down": "docker compose down",
     "dev:api": "pnpm --filter api start:dev",
     "dev:worker": "pnpm --filter api worker:dev",

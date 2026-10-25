@@ -3,11 +3,10 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Prisma } from '@prisma/client';
 import type { Response } from 'express';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { getFile, putFile } from '../common/storage';
 import { config } from '../config';
-import { newToken, sha256 } from '../common/crypto';
+import { sha256 } from '../common/crypto';
 import { ApiZod, Ctx, CurrentCtx, optInt, optStr, zp } from '../common/http';
 import { PrismaService } from '../prisma.service';
 import { TasksService } from '../tasks/tasks.service';
@@ -23,9 +22,27 @@ const profileSchema = z.object({
 const ALLOWED = { 'application/pdf': 'pdf', 'text/plain': 'txt', 'text/markdown': 'md' } as const;
 
 /** Deterministic, AI-free skill detection used as a baseline and to label AI output against. */
-const KNOWN_TECH = ['Python', 'Django', 'FastAPI', 'Flask', 'Go', 'Golang', 'TypeScript', 'JavaScript', 'Node.js', 'NestJS', 'React', 'Next.js', 'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'Kafka', 'RabbitMQ', 'Celery', 'Docker', 'Kubernetes', 'AWS', 'GCP', 'Azure', 'Terraform', 'GraphQL', 'gRPC', 'REST', 'Elasticsearch', 'LangChain', 'LlamaIndex', 'RAG', 'OpenAI', 'PyTorch', 'Airflow', 'Spark', 'Linux', 'CI/CD'];
+const KNOWN_TECH = ['Python', 'Django', 'FastAPI', 'Flask', 'Go', 'Golang', 'TypeScript', 'JavaScript', 'Node.js', 'NestJS', 'React', 'Next.js', 'PostgreSQL', 'MySQL', 'MongoDB', 'Redis', 'Kafka', 'RabbitMQ', 'Celery', 'Docker', 'Kubernetes', 'AWS', 'GCP', 'Azure', 'Terraform', 'GraphQL', 'gRPC', 'REST', 'Elasticsearch', 'LangChain', 'LlamaIndex', 'RAG', 'OpenAI', 'PyTorch', 'Airflow', 'Spark', 'Linux', 'CI/CD', 'Java', 'Spring Boot', 'Kotlin', 'Scala', 'C#', '.NET', 'C++', 'Rust', 'PHP', 'Laravel', 'Ruby', 'Ruby on Rails', 'Angular', 'Vue'];
 export function detectTech(text: string) {
-  return KNOWN_TECH.filter((t) => new RegExp(`(^|[^A-Za-z])${t.replace(/[.+/]/g, (c) => '\\' + c)}([^A-Za-z]|$)`, 'i').test(text));
+  // ".NET" is often glued to the previous word ("Senior.NET Engineer"); upper-case only, so "company.net" URLs don't count
+  return KNOWN_TECH.filter((t) => t === '.NET' ? /\.NET\b/.test(text) : new RegExp(`(^|[^A-Za-z])${t.replace(/[.+/]/g, (c) => '\\' + c)}([^A-Za-z]|$)`, 'i').test(text));
+}
+
+/** New CV version (same label = next version); the workspace's first CV becomes the default. Used by upload and builder publish. */
+export async function createResumeDocument(prisma: PrismaService, workspaceId: string, f: {
+  label: string; fileName: string; mimeType: string; ext: string; buffer: Buffer; extractedText: string;
+  structured?: Prisma.InputJsonValue; structuredStatus?: 'none' | 'confirmed';
+}) {
+  const label = f.label.slice(0, 80);
+  const storagePath = await putFile(workspaceId, f.ext, f.buffer, f.mimeType);
+  const last = await prisma.resumeDocument.findFirst({ where: { workspaceId, label }, orderBy: { version: 'desc' } });
+  const isFirst = !(await prisma.resumeDocument.count({ where: { workspaceId } }));
+  return prisma.resumeDocument.create({
+    data: {
+      workspaceId, label, version: (last?.version ?? 0) + 1, fileName: f.fileName.slice(0, 200), mimeType: f.mimeType, sizeBytes: f.buffer.length,
+      storagePath, sha256: sha256(f.buffer), extractedText: f.extractedText, isDefault: isFirst, structured: f.structured, structuredStatus: f.structuredStatus ?? 'none',
+    },
+  });
 }
 
 export async function extractText(buf: Buffer, ext: string): Promise<string> {
@@ -85,19 +102,7 @@ export class ProfileController {
       throw new BadRequestException('Could not read text from this PDF. Is it a scanned image?');
     }
 
-    const dir = join(config.uploadDir, ctx.workspaceId);
-    await mkdir(dir, { recursive: true });
-    const storagePath = join(dir, `${newToken()}.${ext}`);
-    await writeFile(storagePath, file.buffer, { mode: 0o600 });
-
-    const last = await this.prisma.resumeDocument.findFirst({ where: { workspaceId: ctx.workspaceId, label: cleanLabel }, orderBy: { version: 'desc' } });
-    const isFirst = !(await this.prisma.resumeDocument.count({ where: { workspaceId: ctx.workspaceId } }));
-    const doc = await this.prisma.resumeDocument.create({
-      data: {
-        workspaceId: ctx.workspaceId, label: cleanLabel, version: (last?.version ?? 0) + 1, fileName: file.originalname.slice(0, 200),
-        mimeType: file.mimetype, sizeBytes: file.size, storagePath, sha256: sha256(file.buffer), extractedText: text, isDefault: isFirst,
-      },
-    });
+    const doc = await createResumeDocument(this.prisma, ctx.workspaceId, { label: cleanLabel, fileName: file.originalname, mimeType: file.mimetype, ext, buffer: file.buffer, extractedText: text });
     // Structured extraction is AI work → routed task (LLM, agent, or waits). Text + keyword detection work without AI.
     if (text.trim()) {
       await this.tasks.create(ctx, {
@@ -140,11 +145,11 @@ export class ProfileController {
   async download(@CurrentCtx() ctx: Ctx, @Param('id') id: string, @Res() res: Response) {
     const r = await this.prisma.resumeDocument.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
     if (!r) throw new NotFoundException();
-    const path = resolve(r.storagePath);
-    if (!path.startsWith(resolve(config.uploadDir) + sep)) throw new NotFoundException();
+    const body = await getFile(r.storagePath);
+    if (!body) throw new NotFoundException();
     res.setHeader('Content-Type', r.mimeType);
     res.setHeader('Content-Disposition', `attachment; filename="${r.fileName.replace(/[^\w.\- ]/g, '_')}"`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.send(await readFile(path));
+    res.send(body);
   }
 }

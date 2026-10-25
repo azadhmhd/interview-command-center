@@ -20,7 +20,12 @@ export async function api<T = unknown>(path: string, opts: { method?: string; bo
     body: opts.form ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
   });
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch { // e.g. a proxy's plain-text "Internal Server Error" or an HTML gateway page
+    throw new ApiError(res.ok ? 'The server sent an unreadable response' : `Server error (${res.status}). Try again in a moment.`, res.status, text.slice(0, 500));
+  }
   if (!res.ok) {
     if (res.status === 401 && typeof window !== 'undefined' && !location.pathname.match(/^\/(login|register|forgot-password|reset-password)/)) {
       location.href = `/login?next=${encodeURIComponent(location.pathname)}`;

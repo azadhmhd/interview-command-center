@@ -1,5 +1,5 @@
 /**
- * Apply-kit builder (pure). Answers come ONLY from the candidate profile and the user's explicit standing answers.
+ * Apply-kit builder (pure). Answers come ONLY from the candidate profile, the CV text and the user's explicit standing answers.
  * Nothing is invented: unknown answers are left empty and marked for review. Consents, declarations and
  * demographic questions are answered only from an explicit standing decision. A kit is "complete" (safe to
  * auto-submit) only when every required field has a verified answer.
@@ -20,6 +20,12 @@ export const standingAnswersSchema = z.object({
   workAuthorization: z.string().max(200).optional(),
   requiresSponsorship: z.enum(['yes', 'no']).optional(),
   willingToRelocate: z.enum(['yes', 'no']).optional(),
+  /** e.g. "Bachelor's degree" (derived from the CV when empty) */
+  educationLevel: z.string().max(120).optional(),
+  /** spoken languages, e.g. "English, Malayalam" */
+  languages: z.string().max(200).optional(),
+  /** e.g. "Employed" (derived from a current role in the CV when empty) */
+  employmentStatus: z.string().max(120).optional(),
   /** explicit decision for EEO / demographic questions; never inferred */
   demographics: z.enum(['decline', 'ask_me']).default('ask_me'),
   /** explicit consent to standard data-processing / privacy acknowledgements on application forms */
@@ -102,19 +108,50 @@ export interface KitInput {
   standing: StandingAnswers;
   matchedSkills: string[];
   resumeLabel?: string;
+  /** text of the selected CV, for facts it states (degree, current role, past employers) */
+  resumeText?: string;
   allowAiFreeText: boolean;
   /** AI-drafted answers for open-ended keys, already validated */
   aiAnswers?: Record<string, string>;
   aiCoverNote?: string;
 }
 
-function pickOption(answer: string, options?: string[]) {
+const ALIAS: Record<string, string> = { uae: 'united arab emirates', ksa: 'saudi arabia', uk: 'united kingdom', usa: 'united states', us: 'united states' };
+
+function matchOne(answer: string, options: string[]) {
+  const a = ALIAS[answer.toLowerCase().trim()] ?? answer.toLowerCase().trim();
+  // "Bachelor's degree" ↔ "Bachelor's or equivalent", "Employed (UAE visa)" ↔ "Employed full-time"
+  const head = a.match(/^[a-z]{4,}/)?.[0];
+  return options.find((o) => o.toLowerCase() === a) ?? options.find((o) => o.toLowerCase().startsWith(a) || a.startsWith(o.toLowerCase()))
+    ?? options.find((o) => o.toLowerCase().includes(a)) ?? (head ? options.find((o) => o.toLowerCase().startsWith(head)) : undefined);
+}
+
+/** Map a saved answer onto a form's options. Multi-selects take every listed item that is offered. */
+function pickOption(answer: string, options?: string[], multi = false) {
   if (!options?.length) return { value: answer, ok: true };
-  const a = answer.toLowerCase();
-  const hit = options.find((o) => o.toLowerCase() === a) ?? options.find((o) => o.toLowerCase().startsWith(a) || a.startsWith(o.toLowerCase()))
-    ?? options.find((o) => o.toLowerCase().includes(a));
+  const parts = answer.split(/\s*[,;/]\s*|\s+and\s+/).filter(Boolean);
+  if (multi) {
+    const hits = [...new Set(parts.map((p) => matchOne(p, options)).filter((x): x is string => !!x))];
+    return hits.length ? { value: hits.join(', '), ok: true } : { value: '', ok: false };
+  }
+  // whole answer first, then its parts from the end ("Dubai, UAE" → "United Arab Emirates")
+  const hit = matchOne(answer, options) ?? [...parts].reverse().map((p) => matchOne(p, options)).find(Boolean);
   return hit ? { value: hit, ok: true } : { value: '', ok: false };
 }
+
+export function educationFrom(cv = ''): string | undefined {
+  // only the Education section ("Scrum Master" elsewhere is not a degree); abbreviations as written on degrees, so the
+  // words "be" and "ms" never count
+  const edu = cv.match(/\beducation\b[\s\S]{0,800}/i)?.[0];
+  if (!edu) return undefined;
+  if (/\b(ph\.?d|doctorate)\b/i.test(edu)) return 'Doctorate (PhD)';
+  if (/\bmaster'?s?\b/i.test(edu) || /\b(?:M\.?Sc|M\.?Tech|MBA|M\.Eng|MEng|M\.S|MCA)(?![A-Za-z])/.test(edu)) return "Master's degree";
+  if (/\bbachelor'?s?\b/i.test(edu) || /\b(?:B\.?Sc|B\.?Tech|B\.E|B\.Eng|BEng|B\.S|BCA|BBA)(?![A-Za-z])/.test(edu)) return "Bachelor's degree";
+  if (/\bdiploma\b/i.test(edu)) return 'Diploma';
+  return undefined;
+}
+/** A role dated "… – Present" means currently employed. */
+export const employedFrom = (cv = '') => (/\b(19|20)\d{2}\s*[–—-]\s*(present|current|now)\b/i.test(cv) ? 'Employed' : undefined);
 
 export function buildKit(input: KitInput): ApplyKit {
   const s = input.standing;
@@ -148,8 +185,18 @@ export function buildKit(input: KitInput): ApplyKit {
     else if (/sponsor/.test(L)) set(s.requiresSponsorship === undefined ? undefined : s.requiresSponsorship === 'yes' ? 'Yes' : 'No', 'standing');
     else if (/authori[sz]ed|right to work|work permit|visa status|eligible to work/.test(L)) set(s.workAuthorization, 'standing');
     else if (/relocat/.test(L)) set(s.willingToRelocate === undefined ? undefined : s.willingToRelocate === 'yes' ? 'Yes' : 'No', 'standing');
-    else if (/(current )?(city|location)|where are you based/.test(L) && !SENSITIVE.test(label)) set(s.currentLocation ?? input.profile.location, s.currentLocation ? 'standing' : 'profile');
-    else if (/how did you hear|where did you (find|hear)|source/.test(L)) set(input.sourceLabel, 'job');
+    else if (/(current )?(city|location)|where are you based|where do you (currently )?(live|reside)|country of residence|place of residence/.test(L) && !SENSITIVE.test(label)) set(s.currentLocation ?? input.profile.location, s.currentLocation ? 'standing' : 'profile');
+    else if (/(employed|worked) (at|for|with)\b.*\b(before|previously)|previously (been )?(employed|worked)/.test(L)) {
+      // "Have you ever been employed at Binance before?": No, unless the company appears in your CV (then you decide)
+      if (input.resumeText && !new RegExp(`\\b${input.company.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(input.resumeText)) { set('No', 'profile'); note = `${input.company} is not in your CV`; }
+    }
+    else if (/employment status|currently employed|current(ly)? (working|employ)/.test(L)) set(s.employmentStatus ?? employedFrom(input.resumeText), s.employmentStatus ? 'standing' : 'profile');
+    else if (/education|degree|qualification/.test(L) && !/field of study|major|university|school|institution|gpa|grade/.test(L)) set(s.educationLevel ?? educationFrom(input.resumeText), s.educationLevel ? 'standing' : 'profile');
+    else if (/language(s|\(s\))? (do |can )?you speak|spoken languages?|language proficiency|fluent in/.test(L)) set(s.languages, 'standing');
+    else if (/how did you hear|where did you (find|hear)|source/.test(L)) {
+      const via = /linkedin/i.test(input.sourceLabel) ? /linkedin/i : /indeed/i.test(input.sourceLabel) ? /indeed/i : /company|career|website|site/i;
+      set(q.options?.length ? (q.options.find((o) => via.test(o)) ?? q.options.find((o) => /job board|online|internet|other/i.test(o))) : input.sourceLabel, 'job');
+    }
     else if (/^total years|years of (professional |relevant )?experience/.test(L) && !/\bwith\b|\bin\b/.test(L)) set(input.profile.yearsExperience != null ? String(input.profile.yearsExperience) : undefined, 'profile');
 
     const custom = s.custom.find((c) => label.toLowerCase().includes(c.match.toLowerCase()));
@@ -175,7 +222,7 @@ export function buildKit(input: KitInput): ApplyKit {
 
     let needsReview = false;
     if (answer && q.options?.length) {
-      const p = pickOption(answer, q.options);
+      const p = pickOption(answer, q.options, /multi_select/.test(q.type));
       if (!p.ok) { needsReview = true; note = `"${answer}" is not one of the options: ${q.options.slice(0, 6).join(' / ')}`; answer = ''; source = 'unknown'; }
       else answer = p.value;
     }
