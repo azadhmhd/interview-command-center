@@ -5,16 +5,13 @@ import { AutoApplyService } from '../autoapply/autoapply.service';
 import { PrismaService } from '../prisma.service';
 import { createResumeDocument } from '../profile/profile';
 import { TasksService } from '../tasks/tasks.service';
-import { resumeDesignSchema, ResumeContent, ResumeDesign, toPlainText, toStructured } from './content';
+import { resumeDesignSchema, ResumeContent, ResumeDesign, resumeFileName, toPlainText, toStructured } from './content';
 import { PdfRenderer } from './pdf';
 
 type DraftForPublish = { id: string; workspaceId: string; title: string; content: Prisma.JsonValue; design: Prisma.JsonValue; applicationId: string | null; jobLeadId: string | null };
 
 /** Tailoring a stalled task waits for before applying with the CV the job already has. */
 const TAILOR_TIMEOUT_MS = 2 * 60 * 60_000;
-
-export const resumeFileName = (d: { title: string; content: Prisma.JsonValue }) =>
-  `${((d.content as { header?: { fullName?: string } })?.header?.fullName || d.title).replace(/[^\w.\- ]/g, '_').trim() || 'resume'}.pdf`;
 
 /**
  * Resume ↔ job work shared by the resume builder and the worker: rendering, publishing a draft as a CV version, and the
@@ -29,6 +26,13 @@ export class ResumeJobs {
     return this.pdf.render({ title: d.title, content: d.content as unknown as ResumeContent, design: resumeDesignSchema.parse(d.design ?? {}) as ResumeDesign });
   }
 
+  /** "Name-Role.pdf", the role taken from the job or application this copy is for (none for your main resume). */
+  async fileName(d: Pick<DraftForPublish, 'content' | 'applicationId' | 'jobLeadId'>) {
+    const role = d.jobLeadId ? (await this.prisma.jobLead.findUnique({ where: { id: d.jobLeadId }, select: { title: true } }))?.title
+      : d.applicationId ? (await this.prisma.application.findUnique({ where: { id: d.applicationId }, select: { jobTitle: true } }))?.jobTitle : null;
+    return resumeFileName((d.content as { header?: { fullName?: string } } | null)?.header?.fullName, role);
+  }
+
   /**
    * Saves the PDF as a new CV version (label = resume title) with its facts already confirmed, and attaches it to the
    * linked application / job lead, so Auto Apply uploads this exact CV for that job.
@@ -37,7 +41,7 @@ export class ResumeJobs {
     const content = d.content as unknown as ResumeContent;
     const { pdf, pages } = await this.render(d);
     const resume = await createResumeDocument(this.prisma, d.workspaceId, {
-      label: d.title, fileName: resumeFileName(d), mimeType: 'application/pdf', ext: 'pdf', buffer: pdf,
+      label: d.title, fileName: await this.fileName(d), mimeType: 'application/pdf', ext: 'pdf', buffer: pdf,
       extractedText: toPlainText(content), structured: toStructured(content) as Prisma.InputJsonValue, structuredStatus: 'confirmed',
     });
     // a publish never counts as an edit: keep updatedAt so an open editor's next save is not rejected as a conflict

@@ -47,6 +47,8 @@ and the project uses [Semantic Versioning](https://semver.org/).
   - Explicit "Move to tracker".
 
 ### Fixed
+- Resume PDFs get short, plain file names (`Name-Role.pdf`, e.g. `Sam-Rivera-Python-Developer.pdf`, at most 60
+  characters) instead of the long job title full of underscores, both when downloaded and when uploaded to job forms.
 - "Search now" on a slow search showed `Unexpected token 'I'… is not valid JSON`: scans now answer within the web
   proxy's timeout and finish in the background, and the web client reports non-JSON errors readably.
 - Apply runner: waits for client-rendered forms (Ashby has no `<form>` element), and fill-only mode no longer crashes on

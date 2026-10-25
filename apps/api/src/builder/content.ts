@@ -66,6 +66,19 @@ export type Section = z.infer<typeof sectionSchema>;
 export const DEFAULT_DESIGN: ResumeDesign = resumeDesignSchema.parse({});
 
 /** Only web, mail and phone links survive; bare domains ("janedoe.dev") become https links. */
+/**
+ * A short, plain CV file name an employer can read and no mail filter flags: "Sam-Rivera-Backend-Engineer.pdf".
+ * ASCII words joined by hyphens, the role cut at its first qualifier, at most 60 characters.
+ */
+export function resumeFileName(fullName?: string | null, role?: string | null): string {
+  const words = (s: string) => s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  const name = words(fullName ?? '').slice(0, 3);
+  // "AI Engineer - Remote", "ML Engineer, Applied AI", "Engineer (Falcon)", "Frontend / Backend" → the part before
+  const r = words((role ?? '').split(/\s[-–—|:]\s|[(,/|:–—]/)[0]).filter((w) => !/^(remote|hybrid|onsite)$/i.test(w)).slice(0, 5);
+  const base = [...(name.length ? name : ['Resume']), ...(r.length ? r : ['CV'])].join('-');
+  return `${base.slice(0, 60).replace(/-+$/, '')}.pdf`;
+}
+
 export function safeUrl(url: string): string {
   const u = url.trim();
   if (/^(https?:\/\/|mailto:|tel:)\S+$/i.test(u)) return u;

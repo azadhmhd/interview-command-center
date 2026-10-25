@@ -1,4 +1,4 @@
-import { applyTailoring, fromProfile, normalizeContent, safeUrl, toPlainText, toStructured } from './content';
+import { applyTailoring, fromProfile, normalizeContent, resumeFileName, safeUrl, toPlainText, toStructured } from './content';
 
 const facts = {
   name: 'Sam Rivera', skills: ['Python', 'PostgreSQL'], education: ['B.Tech Computer Science, MES College, 2015 – 2019'], certifications: ['AWS SAA'],
@@ -73,4 +73,17 @@ it('applies AI tailoring without letting it invent facts', () => {
   expect(content.sections[2].groups[0].items).toEqual(['Kafka', 'Python', 'Go']); // reordered, Rust dropped, Go kept
   // an order that drops or invents sections is ignored
   expect(applyTailoring(c, { entries: [], skillGroups: [], sectionOrder: ['sum', 'zzz', 'sk'], notes: '' }).content.sections.map((s) => s.id)).toEqual(['sum', 'sk', 'ex']);
+});
+
+it('names CV files short and plain: Name-Role.pdf', () => {
+  expect(resumeFileName('Sam Rivera', 'Full-Stack AI Applications Engineer (Falcon & Edge)')).toBe('Sam-Rivera-Full-Stack-AI-Applications-Engineer.pdf');
+  expect(resumeFileName('Sam Rivera', 'Python Developer - For a large UAE bank')).toBe('Sam-Rivera-Python-Developer.pdf');
+  expect(resumeFileName('Sam Rivera', 'Machine Learning Engineer, Applied AI - Deployed')).toBe('Sam-Rivera-Machine-Learning-Engineer.pdf');
+  expect(resumeFileName('Sam Rivera', 'Remote App Security Engineer – AI/LLM Security Specialist')).toBe('Sam-Rivera-App-Security-Engineer.pdf');
+  expect(resumeFileName('Sam Rivera', 'AI Engineer | Abu Dhabi, UAE')).toBe('Sam-Rivera-AI-Engineer.pdf');
+  expect(resumeFileName('José Núñez', null)).toBe('Jose-Nunez-CV.pdf'); // main resume, accents folded to ASCII
+  expect(resumeFileName('', '')).toBe('Resume-CV.pdf');
+  const long = resumeFileName('A'.repeat(50), 'B'.repeat(50));
+  expect(long.length).toBeLessThanOrEqual(64);
+  expect(long).toMatch(/^[A-Za-z0-9-]+\.pdf$/);
 });

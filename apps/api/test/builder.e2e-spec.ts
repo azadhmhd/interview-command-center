@@ -84,7 +84,7 @@ describe('Resume builder', () => {
     const master = (await u.post('/resume-drafts', { title: 'Master' }).expect(201)).body;
     const pdf = await u.get(`/resume-drafts/${master.id}/pdf`).buffer(true).parse(binary).expect(200);
     expect(pdf.headers['content-type']).toBe('application/pdf');
-    expect(pdf.headers['content-disposition']).toContain('Sam Rivera.pdf');
+    expect(pdf.headers['content-disposition']).toContain('Sam-Rivera-CV.pdf');
     expect(Number(pdf.headers['x-page-count'])).toBeGreaterThanOrEqual(1);
     expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
 
