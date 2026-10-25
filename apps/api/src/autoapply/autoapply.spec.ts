@@ -1,7 +1,7 @@
 import { dedupeKey } from '../applications/applications';
 import { verifyEvidence } from './autoapply.service';
 import { buildKit, standingAnswersSchema } from './kit';
-import { DEFAULT_PREFERENCES, scoreJob, selectResume } from './matching';
+import { DEFAULT_PREFERENCES, scoreJob, selectResume, atsScore, ATS_MIN } from './matching';
 import { bestApplyOption, buildQueries, parsePostedAt, parseSalary, SEARCH, siteOf, SITES } from './search';
 import { ADAPTERS, canonicalUrl, classifyUrl, parseAlertEmail } from './sources';
 import { canMove, PRESETS } from './state';
@@ -57,12 +57,15 @@ describe('role search providers', () => {
   it('classifies sites and picks the best allowed apply link', () => {
     expect(siteOf('https://ae.linkedin.com/jobs/view/123')).toBe('linkedin');
     expect(siteOf('https://ae.indeed.com/viewjob?jk=abc')).toBe('indeed');
-    expect(siteOf('https://www.glassdoor.com/job/1')).toBe('other');
-    expect(siteOf('https://careers.acme.com/jobs/1')).toBe('company');
-    expect(siteOf('https://evil-linkedin.com/x')).toBe('company'); // strict host match
+    expect(siteOf('https://www.glassdoor.com.br/job/1', 'Glassdoor', 'ByteDance')).toBe('other');
+    expect(siteOf('https://www.jobilize.com/job/ae-dubai-backend', 'Acme Careers', 'Acme')).toBe('other'); // reposting site, whatever its label says
+    expect(siteOf('https://careers.deliveryhero.com/job/1', '', 'Delivery Hero')).toBe('company');
+    expect(siteOf('https://careers.edgegroup.ae/job/1', '', 'EDGE Group PJSC')).toBe('company');
+    expect(siteOf('https://acme.wd3.myworkdayjobs.com/x', '', 'Other Name')).toBe('company');
+    expect(siteOf('https://evil-linkedin.com/x')).toBe('other'); // strict host match
     const opts = [{ title: 'LinkedIn', link: 'https://www.linkedin.com/jobs/view/9' }, { title: 'Acme Careers', link: 'https://careers.acme.com/1' }, { title: 'Greenhouse', link: 'https://job-boards.greenhouse.io/acme/jobs/7' }];
-    expect(bestApplyOption(opts, SITES)).toMatchObject({ atsType: 'greenhouse', site: 'company' });
-    expect(bestApplyOption(opts.slice(0, 2), SITES)?.site).toBe('company');
+    expect(bestApplyOption(opts, SITES, 'Acme')).toMatchObject({ atsType: 'greenhouse', site: 'company' });
+    expect(bestApplyOption(opts.slice(0, 2), SITES, 'Acme')?.site).toBe('company');
     expect(bestApplyOption(opts, ['linkedin'])?.link).toContain('linkedin.com');
     expect(bestApplyOption(opts, ['bayt'])).toBeNull();
   });
@@ -158,8 +161,39 @@ describe('matching', () => {
     expect(m.breakdown.skills.reason).toMatch(/Python/);
     expect(m.explanation).toMatch(/Strong match/);
   });
+  it('off-target titles never reach the shortlist; one listed technology is not a full skills match (real Ziina case)', () => {
+    const analyst = scoreJob(job({ title: 'Finance Data Analyst', description: 'Reporting in Python and Excel for the finance team.' }), prefs, facts, now);
+    expect(analyst.score).toBeLessThan(60);
+    expect(analyst.breakdown.skills.score).toBe(33);
+    for (const title of ['Senior Corporate Legal Counsel', 'Senior Product Designer (Design Systems)']) expect(scoreJob(job({ title }), prefs, facts, now).score).toBeLessThan(60); // real Binance / Careem titles
+    expect(scoreJob(job(), prefs, facts, now).score).toBeGreaterThanOrEqual(80);
+  });
+  it('a title in a language you do not use is not your role (real Google Jobs case)', () => {
+    const java = scoreJob(job({ title: 'Senior Java Backend Engineer | Redis & Postgres', description: 'Strong Java expertise, Redis caching and PostgreSQL.' }), prefs, facts, now);
+    expect(java.breakdown.title.reason).toMatch(/Title asks for Java/);
+    expect(java.missingSkills).toContain('Java');
+    expect(java.score).toBeLessThan(75); // never auto-applied
+    expect(scoreJob(job({ title: 'Senior .NET Backend Engineer', description: 'C# and .NET Core' }), prefs, facts, now).score).toBeLessThan(75);
+    expect(scoreJob(job({ title: 'Senior.NET Backend Engineer | Microservices' }), prefs, facts, now).breakdown.title.reason).toMatch(/\.NET/); // real title
+    expect(scoreJob(job({ description: 'Python, Django, PostgreSQL. Apply at careers.acme.net' }), prefs, facts, now).missingSkills).not.toContain('.NET');
+    expect(scoreJob(job({ title: 'Senior Backend Engineer (JavaScript)' }), prefs, facts, now).breakdown.title.reason).toMatch(/JavaScript/);
+  });
+  it('ATS score: share of the job\'s technologies and title words found in the CV, with the missing ones listed', () => {
+    const cv = 'Senior Backend Engineer. Python, Django, FastAPI, PostgreSQL, Redis, Docker, Kubernetes, AWS.';
+    const full = atsScore(cv, { title: 'Senior Backend Engineer', description: 'Python, Django and PostgreSQL on AWS.' });
+    expect(full.score).toBe(100);
+    const gap = atsScore(cv, { title: 'Backend Engineer, Payments', description: 'Go, Kafka and PostgreSQL. Python is a plus.' });
+    expect(gap.missing).toEqual(expect.arrayContaining(['go', 'kafka', 'payments']));
+    expect(gap.score).toBeLessThan(ATS_MIN);
+    expect(atsScore(cv, { title: 'Engineer' }).score).toBe(100); // nothing to match against
+  });
   it('applies hard eligibility rules before recommending', () => {
     expect(scoreJob(job({ location: 'London, UK' }), prefs, facts, now).blockers.join()).toMatch(/Outside your locations/);
+    // a country covers its emirates and other names; a city stays a city (real case: "Ajman" with "UAE" in locations)
+    const uae = { ...prefs, locations: ['UAE'] };
+    for (const location of ['Ajman', 'Ras Al Khaimah', 'Dubai, United Arab Emirates', 'Sharjah - U.A.E.']) expect(scoreJob(job({ location }), uae, facts, now).blockers).toEqual([]);
+    expect(scoreJob(job({ location: 'Ajman' }), { ...prefs, locations: ['Dubai'] }, facts, now).blockers.join()).toMatch(/Outside your locations \(Ajman\)/);
+    expect(scoreJob(job({ location: 'Riyadh, Saudi Arabia' }), uae, facts, now).blockers.join()).toMatch(/Outside your locations/);
     expect(scoreJob(job({ description: 'UAE nationals only. Python.' }), prefs, facts, now).blockers.join()).toMatch(/citizens|nationals/);
     expect(scoreJob(job({ description: 'Fluent Arabic is required. Python.' }), prefs, facts, now).blockers.join()).toMatch(/Arabic/);
     expect(scoreJob(job({ description: 'Requires 12+ years of experience with Python' }), prefs, facts, now).blockers.join()).toMatch(/12\+ years/);
@@ -233,6 +267,25 @@ describe('apply kit', () => {
     expect(by.privacy).toMatchObject({ answer: 'Yes', source: 'standing' });
     expect(by.q_why).toMatchObject({ source: 'ai' });
     expect(k.complete).toBe(true);
+  });
+  it('answers facts from the CV and saved answers (real Binance / Bybit questions)', () => {
+    const cv = 'Senior Backend Engineer\nAcme Fintech 2023 – Present | Dubai, UAE\nWill be on call; p99 200 ms.\nScrum Master duties.\nEDUCATION\nB.Tech Computer science and Engineering';
+    const q = (key: string, label: string, options?: string[]) => ({ key, label, required: true, type: options ? 'multi_value_single_select' : 'input_text', options });
+    const real = [
+      q('live', 'Where do you currently live?', ['Afghanistan', 'Saudi Arabia', 'United Arab Emirates', 'United Kingdom']),
+      q('edu', 'What is your highest level of education?', ['High school', "Bachelor's or equivalent", "Master's", 'PhD']),
+      { ...q('lang', 'What language(s) can you speak at a native or business level?', ['Arabic', 'English', 'Hindi']), type: 'multi_value_multi_select' },
+      q('emp', 'What is your current employment status?', ['Employed full-time', 'Self-employed', 'Unemployed', 'Student']),
+      q('before', 'Have you ever been employed at Binance before?', ['Yes', 'No']),
+      q('hear', 'How did you hear about our job opening? Please select one of the following options:', ['LinkedIn', 'Company Website', 'Referral', 'Other']),
+    ];
+    const k = buildKit({ ...base, company: 'Binance', sourceLabel: 'Binance', resumeText: cv, questions: real, standing: standingAnswersSchema.parse({ currentLocation: 'Dubai, UAE', languages: 'English, Malayalam' }) });
+    const by = Object.fromEntries(k.answers.map((a) => [a.key, a.answer]));
+    expect(by).toEqual({ live: 'United Arab Emirates', edu: "Bachelor's or equivalent", lang: 'English', emp: 'Employed full-time', before: 'No', hear: 'Company Website' });
+    expect(k.complete).toBe(true);
+    // never claims what the CV doesn't say
+    expect(buildKit({ ...base, company: 'Acme Fintech', resumeText: cv, questions: [real[4]], standing: standingAnswersSchema.parse({}) }).answers[0].answer).toBe(''); // Acme is in the CV
+    expect(buildKit({ ...base, resumeText: 'Will be on call; 200 ms. Scrum Master.', questions: [real[1]], standing: standingAnswersSchema.parse({}) }).answers[0].answer).toBe('');
   });
   it('rejects answers that are not valid options', () => {
     const k = buildKit({ ...base, questions: [questions[4]], standing: standingAnswersSchema.parse({ workAuthorization: 'Pending visa transfer' }) });

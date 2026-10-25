@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { createServer, Server } from 'node:http';
 import { config } from '../src/config';
+import { ResumeJobs } from '../src/builder/jobs';
 import { PrismaService } from '../src/prisma.service';
 import { TickService } from '../src/scheduler/tick.service';
 import { boot, Client, register } from './helpers';
@@ -34,7 +35,7 @@ async function fakeBoards() {
     if (/^\/v1\/boards\/acme\/jobs\/\d+\?questions=true/.test(url)) return send(200, questions);
     if (url.startsWith('/v1/boards/acme/jobs')) return send(200, { jobs });
     if (url.startsWith('/v0/postings/beta')) return send(200, lever);
-    if (url.startsWith('/search.json')) { searches.push(url); return send(200, serp); }
+    if (url.startsWith('/search.json')) { searches.push(url); return void setTimeout(() => send(200, serp), url.includes('slow') ? 5000 : 0); }
     send(404, {});
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -44,6 +45,7 @@ async function fakeBoards() {
 
 describe('Auto Apply (separate section)', () => {
   let app: INestApplication;
+  let atsGate: () => Promise<number>;
   let prisma: PrismaService;
   let u: Client;
   let other: Client;
@@ -53,6 +55,8 @@ describe('Auto Apply (separate section)', () => {
   beforeAll(async () => {
     app = await boot();
     prisma = app.get(PrismaService);
+    // what the worker tick does before a job can be claimed: the ATS check (and tailoring when the CV scores low)
+    atsGate = () => app.get(ResumeJobs).atsTick();
     boards = await fakeBoards();
     u = await register(app, 'Applicant');
     other = await register(app, 'Other');
@@ -103,6 +107,7 @@ describe('Auto Apply (separate section)', () => {
     expect((await u.post('/autoapply/runner/claim', { runner: 'test' }).expect(200)).body.attempt).toBeNull(); // nothing approved yet
     const strong = await leadBy('Senior Backend Engineer');
     await u.patch(`/autoapply/leads/${strong.id}/status`, { status: 'APPROVED' }).expect(200);
+    await atsGate();
     const c = (await u.post('/autoapply/runner/claim', { runner: 'test' }).expect(200)).body;
     expect(c).toMatchObject({ mode: 'prefill', lead: { id: strong.id, atsType: 'greenhouse' } });
     expect(c.lead.resume.fileName).toBe('cv.txt');
@@ -117,6 +122,7 @@ describe('Auto Apply (separate section)', () => {
     // unverified "submitted" → needs attention, and the job is never retried automatically
     const py = await leadBy('Python Backend Engineer');
     await u.patch(`/autoapply/leads/${py.id}/status`, { status: 'APPROVED' }).expect(200);
+    await atsGate();
     const c2 = (await u.post('/autoapply/runner/claim', { runner: 'test' })).body;
     await u.post(`/autoapply/runner/attempts/${c2.attempt.id}/submit-intent`).expect(200);
     const bad = await u.post(`/autoapply/runner/attempts/${c2.attempt.id}/result`, { status: 'SUBMITTED', evidence: { confirmationText: 'Please correct the errors below' } }).expect(200);
@@ -133,6 +139,7 @@ describe('Auto Apply (separate section)', () => {
   it('recovers crashed runners: retries before Submit, never after', async () => {
     const mk = await leadBy('Marketing Manager');
     await u.patch(`/autoapply/leads/${mk.id}/status`, { status: 'APPROVED' }).expect(200);
+    await atsGate();
     const a = (await u.post('/autoapply/runner/claim', { runner: 'crashy' })).body;
     await prisma.applyAttempt.update({ where: { id: a.attempt.id }, data: { leaseUntil: new Date(Date.now() - 1000) } });
     await app.get(TickService).tick('w');
@@ -158,6 +165,7 @@ describe('Auto Apply (separate section)', () => {
     const llm = await leadBy('LLM Engineer');
     expect(llm).toMatchObject({ status: 'APPROVED', autoApproved: true, kitStatus: 'complete' });
     await u.put('/autoapply/config', { dailyApplyCap: 0 }).expect(200);
+    await atsGate();
     expect((await u.post('/autoapply/runner/claim', { runner: 'auto' })).body.reason).toMatch(/Daily cap/);
     await u.put('/autoapply/config', { dailyApplyCap: 5 }).expect(200);
     const c = (await u.post('/autoapply/runner/claim', { runner: 'auto' })).body;
@@ -262,5 +270,22 @@ describe('Auto Apply (separate section)', () => {
     expect((await other.get('/autoapply/providers')).body.every((p: { hasKey: boolean }) => !p.hasKey)).toBe(true);
     await u.patch(`/autoapply/sources/${saved.body.id}`, { config: { board: 'x' } }).expect(404);
     await u.put('/autoapply/providers/NOPE', {}).expect(404);
+  });
+
+  it('a search slower than the proxy timeout answers "running" and finishes in the background', async () => {
+    const before = boards.searches.length;
+    await u.put('/autoapply/config', { preferences: { ...(await u.get('/autoapply/config')).body.preferences, titles: ['slow role'], maxSearchQueries: 1 } }).expect(200);
+    const id = (await u.get('/autoapply/providers')).body.find((p: { type: string }) => p.type === 'GOOGLE_JOBS').id;
+    await u.put('/autoapply/providers/GOOGLE_JOBS', { monthlyBudget: 50 }).expect(200);
+    const t = Date.now();
+    const r = await u.post(`/autoapply/sources/${id}/run`).expect(200);
+    expect(r.body).toEqual({ found: 0, created: 0, running: true });
+    expect(Date.now() - t).toBeLessThan(4500);
+    await u.post(`/autoapply/sources/${id}/run`).expect(409); // still leased
+    for (let i = 0; i < 40 && (await prisma.jobSource.findUniqueOrThrow({ where: { id } })).leaseUntil; i++) await new Promise((ok) => setTimeout(ok, 250));
+    const src = await prisma.jobSource.findUniqueOrThrow({ where: { id } });
+    expect(src.leaseUntil).toBeNull();
+    expect(src.lastSuccessAt!.getTime()).toBeGreaterThan(t + 4000);
+    expect(boards.searches.length).toBe(before + 1);
   });
 });

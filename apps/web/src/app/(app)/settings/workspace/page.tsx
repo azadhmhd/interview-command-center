@@ -7,7 +7,7 @@ import { api, setWorkspace, useApi } from '@/lib/api';
 import { useMe, useSettings } from '@/lib/hooks';
 import { fmtDate } from '@/lib/utils';
 
-const TASK_TYPES = ['course_generation', 'lesson_regeneration', 'answer_evaluation', 'answer_improvement', 'question_extraction', 'resume_extraction', 'revision_notes', 'gap_analysis', 'mock_generation', 'company_research'];
+const TASK_TYPES = ['course_generation', 'lesson_regeneration', 'answer_evaluation', 'answer_improvement', 'question_extraction', 'resume_extraction', 'resume_draft_import', 'resume_tailoring', 'revision_notes', 'gap_analysis', 'mock_generation', 'company_research'];
 const DEFAULT_ROUTE: Record<string, string> = { course_generation: 'auto', company_research: 'agent' };
 
 interface Members { members: { id: string; userId: string; email: string; name: string; role: string }[]; invitations: { id: string; email: string; role: string; expiresAt: string }[] }

@@ -1,13 +1,16 @@
 ---
 name: icc-import-validate
-description: Extract structured data from CVs or interview notes and validate outputs before import (resume_extraction, question_extraction tasks; also use to check any result.json).
+description: Extract structured data from CVs or interview notes and validate outputs before import (resume_extraction, resume_draft_import, question_extraction tasks; also use to check any result.json).
 ---
 # Extract, validate and import
 
-Use for `resume_extraction` and `question_extraction`, and to self-check any task output before syncing.
+Use for `resume_extraction`, `resume_draft_import` and `question_extraction`, and to self-check any task output before syncing.
 
 ## resume_extraction
 Copy facts exactly as written in `cvText`. Do not infer achievements, dates or skills that are not present. Omit unknown fields. The user reviews and confirms the result in the app; until then it is labelled AI-inferred.
+
+## resume_draft_import
+Turn `cvText` into the resume builder structure, **word for word**: no rephrasing, shortening or translating. Keep the CV's section order and headings (a summary directly under the header has an empty `title`). Skills: one group per labelled line (`Label: a, b, c`), items split on commas. Each job/degree/project/certificate is one entry: `title` = role/degree/name, `subtitle` = employer/school/issuer, dates exactly as written, one bullet per bullet point (re-join lines the PDF wrapped). Leave `id` fields empty.
 
 ## question_extraction
 Split `notes` into questions. Include the candidate's answer **exactly as written in the notes** (if any) and follow-ups. Do not add questions that are not in the notes.

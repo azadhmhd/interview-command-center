@@ -1,11 +1,9 @@
 import { Body, Controller, Delete, Get, HttpCode, Post, Res, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
-import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
 import { z } from 'zod';
-import { config } from '../config';
 import { AuditService } from '../common/audit.service';
+import { removeWorkspaceFiles } from '../common/storage';
 import { verifyPassword } from '../common/crypto';
 import { ApiZod, Ctx, CurrentCtx, Public, SESSION_COOKIE, zp } from '../common/http';
 import { PrismaService } from '../prisma.service';
@@ -69,7 +67,7 @@ export class AccountController {
     ]);
     for (const id of ids) {
       if (!/^[a-z0-9]+$/.test(id)) throw new BadRequestException();
-      await rm(join(config.uploadDir, id), { recursive: true, force: true });
+      await removeWorkspaceFiles(id);
     }
     await this.audit.record({ ip: ctx.ip }, 'account.deleted', { type: 'user', id: ctx.userId });
     res.clearCookie(SESSION_COOKIE, { path: '/' });

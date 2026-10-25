@@ -131,6 +131,10 @@ export class TasksService {
       if (t.type === 'job_application') throw new BadRequestException('Applying needs a browser; run this task with a coding agent');
       r = { method: 'llm', state: 'queued', reason: 'User requested the LLM endpoint' };
     }
+    // waiting for an agent and Claude Code is on: run it there instead of the route that already gave up on it
+    if (!method && t.state === 'ready_for_agent' && config.claudeCli.enabled && t.type !== 'job_application') {
+      r = { method: 'agent_cli', state: 'queued', reason: 'Retry with the Claude Code headless adapter' };
+    }
     if (r.state === 'ready_for_agent' && t.state === 'ready_for_agent') {
       throw new BadRequestException(`No automatic executor available (${llm.reason ?? 'routing policy prefers an agent'}). Export the task package and run it with a coding agent.`);
     }

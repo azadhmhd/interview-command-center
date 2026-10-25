@@ -3,11 +3,9 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Prisma, Priority } from '@prisma/client';
 import type { Response } from 'express';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { getFile, putFile } from '../common/storage';
 import { config } from '../config';
-import { newToken } from '../common/crypto';
 import { ApiZod, Ctx, CurrentCtx, optDate, optInt, optStr, zp } from '../common/http';
 import { readSettings } from '../common/workspace-settings';
 import { PrismaService } from '../prisma.service';
@@ -207,10 +205,7 @@ export class ApplicationsController {
     if (roundId) await this.access.round(ctx, roundId);
     if (!file) throw new BadRequestException('Attach a file in the "file" field');
     if (!ATTACH_TYPES.includes(file.mimetype)) throw new BadRequestException(`Allowed types: ${ATTACH_TYPES.join(', ')}`);
-    const dir = join(config.uploadDir, ctx.workspaceId);
-    await mkdir(dir, { recursive: true });
-    const storagePath = join(dir, `${newToken()}.bin`);
-    await writeFile(storagePath, file.buffer, { mode: 0o600 });
+    const storagePath = await putFile(ctx.workspaceId, 'bin', file.buffer, file.mimetype);
     const a = await this.prisma.attachment.create({
       data: { workspaceId: ctx.workspaceId, applicationId: id, roundId: roundId || undefined, kind: 'file', label: (label || file.originalname).slice(0, 200), fileName: file.originalname.slice(0, 200), mimeType: file.mimetype, sizeBytes: file.size, storagePath },
     });
@@ -222,12 +217,12 @@ export class ApplicationsController {
   async download(@CurrentCtx() ctx: Ctx, @Param('id') id: string, @Param('attId') attId: string, @Res() res: Response) {
     const a = await this.prisma.attachment.findFirst({ where: { id: attId, applicationId: id, workspaceId: ctx.workspaceId, kind: 'file' } });
     if (!a?.storagePath) throw new NotFoundException();
-    const path = resolve(a.storagePath);
-    if (!path.startsWith(resolve(config.uploadDir) + sep)) throw new NotFoundException();
+    const body = await getFile(a.storagePath);
+    if (!body) throw new NotFoundException();
     res.setHeader('Content-Type', a.mimeType ?? 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${(a.fileName ?? 'file').replace(/[^\w.\- ]/g, '_')}"`);
     res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.send(await readFile(path));
+    res.send(body);
   }
 
   @Delete(':id/attachments/:attId')

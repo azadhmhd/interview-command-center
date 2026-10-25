@@ -44,6 +44,12 @@ every interview into better preparation for the next one:
 - **Round-specific crash courses:** built from the job description, round type, deadline, your CV and your recorded
   weaknesses. Prioritised topics with reasons, a time-boxed schedule, lessons, model answers, flashcards, mock
   interviews and readiness tracking.
+- **Resume builder:** unlimited resumes and job-specific copies with the same design, a live A4 preview, PDF export and
+  AI tailoring per job that may only reword and reorder (never invents facts). Files are stored in MinIO / S3 or on
+  local disk. [Details](docs/RESUME_BUILDER.md)
+- **Coding practice:** multi-stage problems in the style of AI-assisted coding interviews plus pattern sections, in
+  Python or JavaScript. Tests run in your browser (never on the server), and an AI review scores correctness, approach,
+  verification, code quality and communication. [Details](docs/CODING_PRACTICE.md)
 - **Practice & evaluation:** rubric scoring (correctness, completeness, depth, clarity). Model answers stay hidden until
   you attempt. Retry and compare with previous attempts.
 - **Auto Apply:** a separate section that finds jobs by your role and location through Google Jobs (SerpApi) and
@@ -51,8 +57,10 @@ every interview into better preparation for the next one:
   (Greenhouse, Lever, Ashby, SmartRecruiters, Workable) and pasted alert emails. You choose which sites to apply through. It scores each job with reasons and
   hard blockers, prepares an apply kit from your saved answers, and applies through a local browser runner or Claude
   in Chrome. You can approve each job or turn on auto-submit within guardrails (stops on CAPTCHA and logins, never
-  guesses answers, never applies twice, requires proof). Recruiter contacts are saved for later outreach.
-  [Details](docs/AUTO_APPLY.md)
+  guesses answers, never applies twice, requires proof). Before applying it checks the CV's ATS keyword match and
+  tailors a copy when it scores low. The runner can drive Claude Code in your own browser (Claude in Chrome), which
+  works on forms that reject automated browsers. A Mission control page shows the pipeline live. Recruiter contacts
+  are saved for later outreach. [Details](docs/AUTO_APPLY.md)
 - **Bring your own AI:** one OpenAI-compatible client (Ollama, vLLM, LM Studio, hosted providers) **or** your
   existing Claude Code / Cursor subscription through agent task packages and a reusable skill pack.
 - **Automatic preparation schedule:** milestones at 3, 2 and 1 days before the interview and on interview day,
@@ -249,7 +257,9 @@ See [docs/TESTING.md](docs/TESTING.md).
 | Architecture & decisions | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Setup, deployment & operations | [docs/SETUP.md](docs/SETUP.md) |
 | LLM configuration & troubleshooting | [docs/AI_CONFIG.md](docs/AI_CONFIG.md) |
+| Resume builder: templates, job copies, PDF, tailoring, storage | [docs/RESUME_BUILDER.md](docs/RESUME_BUILDER.md) |
 | Auto Apply: sources, matching, guardrails, runner | [docs/AUTO_APPLY.md](docs/AUTO_APPLY.md) |
+| Coding practice: 93 problems in 16 sections, pattern lessons, in-browser runner, AI review | [docs/CODING_PRACTICE.md](docs/CODING_PRACTICE.md) |
 | Coding agents, task states & skill pack | [docs/AGENTS.md](docs/AGENTS.md) |
 | API overview (live OpenAPI at `/api/docs`) | [docs/API.md](docs/API.md) |
 | Security design | [docs/SECURITY.md](docs/SECURITY.md) |

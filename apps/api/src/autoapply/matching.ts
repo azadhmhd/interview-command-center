@@ -57,7 +57,8 @@ export interface MatchResult {
 }
 
 const WEIGHTS = { skills: 35, title: 20, seniority: 15, location: 15, salary: 5, recency: 10 } as const;
-const STOP = new Set(['and', 'or', 'the', 'of', 'a', 'an', 'to', 'for', 'in', 'with', 'engineer', 'developer', 'ii', 'iii', 'i']);
+// seniority words say nothing about the kind of role ("Senior Legal Counsel" is not close to "Senior Backend Engineer")
+const STOP = new Set(['and', 'or', 'the', 'of', 'a', 'an', 'to', 'for', 'in', 'with', 'engineer', 'developer', 'ii', 'iii', 'i', 'senior', 'sr', 'junior', 'jr', 'lead', 'principal', 'staff', 'mid', 'head']);
 const LEVELS: [RegExp, number][] = [[/\b(intern|trainee|graduate)\b/i, 0], [/\b(junior|jr\.?|associate|entry)\b/i, 1], [/\b(mid|intermediate)\b/i, 2],
   [/\b(senior|sr\.?)\b/i, 3], [/\b(staff|lead|principal|architect)\b/i, 4], [/\b(head|director|vp|chief)\b/i, 5]];
 
@@ -80,11 +81,21 @@ export function techIn(text: string): string[] {
   return detectTech(text).filter((t) => !AMBIGUOUS[t.toLowerCase()] || AMBIGUOUS[t.toLowerCase()].test(text));
 }
 
+/**
+ * A country in your locations also covers its other names and its cities: "UAE" matches "Ajman" and "Dubai, United
+ * Arab Emirates". A city stays a city ("Dubai" does not match "Ajman").
+ * ponytail: UAE only (the countries in use); add a row per country when searches go wider.
+ */
+const COUNTRIES: { names: string[]; places: string[] }[] = [
+  { names: ['uae', 'u.a.e', 'united arab emirates', 'emirates'], places: ['dubai', 'abu dhabi', 'sharjah', 'ajman', 'umm al quwain', 'umm al-quwain', 'ras al khaimah', 'ras al-khaimah', 'fujairah', 'al ain'] },
+];
+const placesFor = (pref: string) => { const c = COUNTRIES.find((x) => x.names.includes(pref.trim().toLowerCase().replace(/\.$/, ''))); return c ? [...c.names, ...c.places] : [pref]; };
+
 /** Remote roles limited to specific countries/regions you are not in are not "remote for you". */
 const REMOTE_ANYWHERE = /\b(anywhere|worldwide|global|international|emea|middle east|mena|gcc|gulf|uae|united arab emirates|dubai|abu dhabi)\b/i;
 export function remoteFor(location: string | null | undefined, remote: boolean | null | undefined, prefs: Pick<Preferences, 'locations'>): 'match' | 'anywhere' | 'restricted' | 'no' {
   const loc = location ?? '';
-  if (prefs.locations.some((l) => has(loc, l))) return 'match';
+  if (prefs.locations.some((l) => placesFor(l).some((p) => has(loc, p)))) return 'match';
   if (!remote && !/\bremote\b/i.test(loc)) return 'no';
   const regions = loc.replace(/\b(remote|fully|hybrid|first|work from home|wfh)\b/gi, '').replace(/[^a-z]+/gi, ' ').trim();
   return !regions || REMOTE_ANYWHERE.test(loc) ? 'anywhere' : 'restricted';
@@ -142,7 +153,8 @@ export function scoreJob(job: MatchJob, prefs: Preferences, facts: CandidateFact
   const missing = jdSkills.filter((s) => !matched.includes(s));
 
   const skills: Dimension = jdSkills.length
-    ? { score: Math.min(100, Math.round((matched.length / jdSkills.length) * 100 + (matched.length >= 5 ? 10 : 0))), weight: WEIGHTS.skills, reason: `Matches ${matched.length}/${jdSkills.length} technologies${matched.length ? `: ${matched.slice(0, 8).join(', ')}` : ''}` }
+    // at least 3 in the denominator: "Python" alone in a finance role is not a full skills match
+    ? { score: Math.min(100, Math.round((matched.length / Math.max(3, jdSkills.length)) * 100 + (matched.length >= 5 ? 10 : 0))), weight: WEIGHTS.skills, reason: `Matches ${matched.length}/${jdSkills.length} technologies${matched.length ? `: ${matched.slice(0, 8).join(', ')}` : ''}` }
     // a description that names no technology at all is a weak signal for a technical candidate; no description is neutral
     : { score: job.description ? 30 : 50, weight: WEIGHTS.skills, reason: job.description ? 'No recognisable technologies listed' : 'No description available yet' };
 
@@ -155,6 +167,9 @@ export function scoreJob(job: MatchJob, prefs: Preferences, facts: CandidateFact
     const overlap = [...a].filter((t) => b.has(t)).length / Math.max(1, a.size);
     if (overlap * 85 > titleScore) { titleScore = Math.round(overlap * 85); titleReason = `Close to "${w}"`; }
   }
+  // "Senior Java Backend Engineer" is not your backend role if you don't work in Java
+  const titleTech = techIn(job.title).filter((t) => !matched.includes(t));
+  if (titleTech.length && titleScore > 20) { titleScore = 20; titleReason = `Title asks for ${titleTech.join(', ')}, which you haven't listed`; }
 
   const jl = jobLevel(job.title), cl = candidateLevel(facts.yearsExperience);
   const seniority: Dimension = jl == null || cl == null
@@ -181,7 +196,9 @@ export function scoreJob(job: MatchJob, prefs: Preferences, facts: CandidateFact
     : { score: age <= 7 ? 100 : age <= 30 ? 70 : age <= prefs.maxAgeDays ? 40 : 10, weight: WEIGHTS.recency, reason: `Published ${Math.max(0, Math.round(age))} day(s) ago` };
 
   const breakdown = { skills, title: { score: titleScore, weight: WEIGHTS.title, reason: titleReason }, seniority, location, salary, recency };
-  const score = Math.round(Object.values(breakdown).reduce((s, d) => s + d.score * d.weight, 0) / 100);
+  // a role you are not looking for never reaches the shortlist, however well the rest scores
+  const offTarget = wanted.length > 0 && titleScore < 40;
+  const score = Math.min(offTarget ? 55 : 100, Math.round(Object.values(breakdown).reduce((s, d) => s + d.score * d.weight, 0) / 100));
   const blockers = blockersFor(job, prefs, facts);
   const strengths = Object.values(breakdown).filter((d) => d.score >= 80).map((d) => d.reason);
   const gaps = Object.values(breakdown).filter((d) => d.score < 50).map((d) => d.reason);
@@ -218,4 +235,19 @@ export function selectResume(job: MatchJob, resumes: ResumeOption[]): { resumeId
     resumeId: best.r.id,
     reason: best.covered.length ? `"${best.r.label} v${best.r.version}" covers ${best.covered.slice(0, 6).join(', ')}` : `"${best.r.label} v${best.r.version}" (default; no CV mentions the listed technologies)`,
   };
+}
+
+/** Below this ATS score a job gets a tailored CV before applying. ponytail: constant; a setting when it needs tuning. */
+export const ATS_MIN = 85;
+
+/**
+ * ATS-style keyword match of a CV against a job, 0–100: the share of the job's keywords (technologies it names plus the
+ * meaningful words of its title) that appear in the CV text. Deterministic, so the score and the missing list explain
+ * themselves.
+ */
+export function atsScore(cvText: string, job: { title: string; description?: string | null }): { score: number; matched: string[]; missing: string[] } {
+  const keywords = [...new Set([...techIn(`${job.title}\n${job.description ?? ''}`), ...[...tokens(job.title)].filter((t) => t.length > 2 && !/^\d+$/.test(t))].map((k) => k.toLowerCase()))];
+  if (!keywords.length) return { score: 100, matched: [], missing: [] };
+  const matched = keywords.filter((k) => has(cvText, k));
+  return { score: Math.round((100 * matched.length) / keywords.length), matched, missing: keywords.filter((k) => !matched.includes(k)) };
 }

@@ -2,7 +2,7 @@
 import { Play, Rocket, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
-import { AutoApplyNav } from '@/components/auto-apply-bits';
+import { AutoApplyNav, useScan } from '@/components/auto-apply-bits';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorBox, Field, Input, Loading, PageHeader, Select, useAction } from '@/components/ui';
 import { api, refresh, useApi } from '@/lib/api';
 import { fmtDate, relTime } from '@/lib/utils';
@@ -22,6 +22,7 @@ export default function Sources() {
   const { data, error, isLoading, mutate } = useApi<Source[]>('/autoapply/sources');
   const [f, setF] = useState({ type: 'GREENHOUSE', name: '', board: '', company: '' });
   const { busy, run } = useAction();
+  const { scanning, scan } = useScan();
   const reload = () => { mutate(); refresh('/autoapply'); };
   const hint = TYPES.find((t) => t.value === f.type)?.hint;
   return (
@@ -53,7 +54,7 @@ export default function Sources() {
                   <p className="text-xs text-muted">{s.config.board ? `board “${s.config.board}”` : 'your titles × locations'} · {s._count.leads} jobs · last scan {s.lastRunAt ? relTime(s.lastRunAt) : 'never'}{s.lastSuccessAt && ` · last success ${fmtDate(s.lastSuccessAt, true)} (${s.lastFoundCount} open roles)`}</p>
                   {s.lastError && <p className="text-xs text-danger">Last error: {s.lastError}</p>}
                 </div>
-                <Button size="sm" variant="outline" loading={busy === s.id} onClick={async () => { const r = await run(s.id, () => api<{ found: number; created: number; error?: string }>(`/autoapply/sources/${s.id}/run`, { method: 'POST' })); if (r) { reload(); } }}><Play className="h-3.5 w-3.5" />Scan now</Button>
+                <Button size="sm" variant="outline" loading={scanning === s.id} onClick={() => scan(s.id)}><Play className="h-3.5 w-3.5" />Scan now</Button>
                 <Button size="sm" variant="ghost" onClick={async () => { await run('t', () => api(`/autoapply/sources/${s.id}`, { method: 'PATCH', body: { enabled: !s.enabled } })); reload(); }}>{s.enabled ? 'Pause' : 'Resume'}</Button>
                 <Button size="icon" variant="ghost" aria-label={`Delete ${s.name}`} onClick={async () => { if (confirm(`Remove ${s.name}? Jobs already found stay.`)) { await run('d', () => api(`/autoapply/sources/${s.id}`, { method: 'DELETE' })); reload(); } }}><Trash2 className="h-3.5 w-3.5" /></Button>
               </li>

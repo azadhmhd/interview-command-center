@@ -11,11 +11,24 @@ export const SITES = ['linkedin', 'indeed', 'bayt', 'gulftalent', 'naukrigulf', 
 export type Site = (typeof SITES)[number];
 export const SITE_LABEL: Record<Site, string> = { linkedin: 'LinkedIn', indeed: 'Indeed', bayt: 'Bayt', gulftalent: 'GulfTalent', naukrigulf: 'Naukrigulf', company: 'Company careers page', other: 'Other job sites' };
 
-/** Job boards / aggregators that are not the employer's own careers page. */
-const OTHER_BOARDS = ['glassdoor.com', 'jooble.org', 'naukri.com', 'monster.com', 'monstergulf.com', 'foundit.in', 'careerjet.ae', 'careerjet.com', 'dubizzle.com', 'laimoon.com', 'drjobpro.com', 'ziprecruiter.com', 'talent.com', 'jobleads.com', 'simplyhired.com', 'jora.com', 'adzuna.com', 'wellfound.com', 'builtin.com', 'jobrapido.com', 'whatjobs.com', 'jobsora.com', 'tanqeeb.com', 'akhtaboot.com', 'recruit.net', 'expatriates.com', 'gulfjobs.com', 'bebee.com', 'learn4good.com', 'trabajo.org'];
+/** Applicant-tracking systems that host employers' own application pages. */
+const ATS_HOSTS = ['greenhouse.io', 'lever.co', 'ashbyhq.com', 'smartrecruiters.com', 'workable.com', 'myworkdayjobs.com', 'myworkdaysite.com', 'bamboohr.com', 'recruitee.com',
+  'teamtailor.com', 'breezy.hr', 'jobvite.com', 'icims.com', 'successfactors.com', 'successfactors.eu', 'oraclecloud.com', 'taleo.net', 'personio.de', 'personio.com', 'zohorecruit.com',
+  'pinpointhq.com', 'jazzhr.com', 'applytojob.com', 'eightfold.ai', 'join.com', 'manatal.com', 'freshteam.com', 'hrmos.co'];
+const CORP = /\b(l\.?l\.?c|ltd|limited|inc|corp|co|pjsc|psc|fz-?llc|fzco|fze|dmcc|group|holdings?|technolog(y|ies)|solutions|services|the|and)\b/g;
 
-/** Which site a link belongs to (for the site filter). ATS-hosted and employer domains count as the company page. */
-export function siteOf(url: string, label = ''): Site {
+/**
+ * Is this the employer's own application page? Only an ATS host or a domain carrying the company's name counts:
+ * everything else (aggregators, reposting sites) is a job board, even when the listing is labelled as the company's.
+ */
+export function isEmployerHost(host: string, company: string): boolean {
+  if (ATS_HOSTS.some((d) => onDomain(host, d))) return true;
+  const slug = company.toLowerCase().replace(CORP, '').replace(/[^a-z0-9]/g, '');
+  return slug.length >= 3 && host.toLowerCase().replace(/[^a-z0-9]/g, '').includes(slug);
+}
+
+/** Which site a link belongs to (for the site filter). */
+export function siteOf(url: string, label = '', company = ''): Site {
   let h = '';
   try { h = new URL(url).hostname.replace(/^www\./, ''); } catch { /* label only */ }
   const by = (d: string, name: RegExp) => (h && onDomain(h, d)) || name.test(label);
@@ -24,17 +37,15 @@ export function siteOf(url: string, label = ''): Site {
   if (by('bayt.com', /\bbayt\b/i)) return 'bayt';
   if (by('gulftalent.com', /\bgulf ?talent\b/i)) return 'gulftalent';
   if (by('naukrigulf.com', /\bnaukri ?gulf\b/i)) return 'naukrigulf';
-  if (h && OTHER_BOARDS.some((d) => onDomain(h, d))) return 'other';
-  if (!h) return /careers?|company|website/i.test(label) ? 'company' : 'other';
-  return 'company';
+  return h && isEmployerHost(h, company) ? 'company' : 'other';
 }
 
 export interface ApplyOption { title: string; link: string; site: Site; atsType: string }
 
 /** Best place to apply among the allowed sites: auto-appliable ATS form > company page > big boards > others. */
-export function bestApplyOption(options: { title: string; link: string }[], allowed: readonly string[]): ApplyOption | null {
+export function bestApplyOption(options: { title: string; link: string }[], allowed: readonly string[], company = ''): ApplyOption | null {
   const rank = (o: ApplyOption) => (['greenhouse', 'lever', 'ashby'].includes(o.atsType) ? 4 : o.site === 'company' ? 3 : o.site === 'other' ? 1 : 2);
-  const enriched = options.filter((o) => /^https?:\/\//.test(o.link)).map((o) => ({ ...o, site: siteOf(o.link, o.title), atsType: classifyUrl(o.link).atsType }));
+  const enriched = options.filter((o) => /^https?:\/\//.test(o.link)).map((o) => ({ ...o, site: siteOf(o.link, o.title, company), atsType: classifyUrl(o.link).atsType }));
   const usable = enriched.filter((o) => allowed.includes(o.site));
   return usable.sort((a, b) => rank(b) - rank(a))[0] ?? null;
 }
@@ -91,7 +102,7 @@ export const SEARCH = {
     for (const x of (j.jobs_results ?? []) as Obj[]) {
       const options: { title: string; link: string }[] = (x.apply_options ?? []).map((o: Obj) => ({ title: String(o.title ?? ''), link: String(o.link ?? '') }));
       if (!options.length && x.share_link) options.push({ title: x.via ?? 'Google', link: x.share_link });
-      const best = bestApplyOption(options, allowed);
+      const best = bestApplyOption(options, allowed, String(x.company_name ?? ''));
       if (!best) continue; // none of the places to apply are on your allowed sites
       const ext = x.detected_extensions ?? {};
       const { atsMeta } = classifyUrl(best.link);
@@ -113,7 +124,7 @@ export const SEARCH = {
     const out: SearchHit[] = [];
     for (const x of (j.jobs ?? []) as Obj[]) {
       if (!x.link || !x.title) continue;
-      const site = siteOf(x.source ? `https://${String(x.source).replace(/^https?:\/\//, '')}` : '', x.source ?? '');
+      const site = siteOf(x.source ? `https://${String(x.source).replace(/^https?:\/\//, '')}` : '', x.source ?? '', x.company ?? '');
       if (!allowed.includes(site)) continue;
       out.push({
         externalId: String(x.id ?? ''), title: x.title, company: x.company || 'Unknown company', location: x.location, description: htmlToText(String(x.snippet ?? '')).slice(0, 5000),

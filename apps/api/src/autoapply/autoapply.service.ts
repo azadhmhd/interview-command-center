@@ -238,7 +238,7 @@ export class AutoApplyService {
     const kit = buildKit({
       title: lead.title, company: lead.company, sourceLabel: lead.discoveredVia[0] ?? 'Company careers page', questions: questions ?? standardQuestionsFor(lead.atsType),
       account: { name: user?.name ?? '', email: user?.email ?? '' }, profile: facts.profile ?? {}, standing: cfg.standingAnswers,
-      matchedSkills: ((lead.fitBreakdown as { matchedSkills?: string[] } | null)?.matchedSkills) ?? [], resumeLabel: resume ? `${resume.label} v${resume.version} (${resume.fileName})` : undefined,
+      matchedSkills: ((lead.fitBreakdown as { matchedSkills?: string[] } | null)?.matchedSkills) ?? [], resumeLabel: resume ? `${resume.label} v${resume.version} (${resume.fileName})` : undefined, resumeText: resume?.extractedText ?? undefined,
       allowAiFreeText: cfg.allowAiFreeText, aiAnswers: prev?.aiAnswers, aiCoverNote: edits?.coverNote ?? prev?.aiCoverNote,
     });
     // the user's own edits win over everything else
@@ -374,11 +374,12 @@ export class AutoApplyService {
 
   // ───────────── apply runner protocol ─────────────
 
-  /** Claim the best approved, automatable job. Conditional update = only one runner can claim a job. */
-  async claim(ctx: Ctx, runner: string) {
+  /** Claim the best approved job it can apply to (Playwright: supported ATS forms only). Conditional update = only one runner can claim a job. */
+  async claim(ctx: Ctx, runner: string, engine: 'playwright' | 'claude' = 'playwright') {
     const cfg = await this.config(ctx.workspaceId);
     const candidates = await this.prisma.jobLead.findMany({
-      where: { workspaceId: ctx.workspaceId, status: 'APPROVED', atsType: { in: AUTOMATABLE_ATS }, applyUrl: { not: null } },
+      // atsStage ready: the ATS check (and tailoring, when the CV scored below ATS_MIN) is done
+      where: { workspaceId: ctx.workspaceId, status: 'APPROVED', atsStage: 'ready', ...(engine === 'playwright' && { atsType: { in: AUTOMATABLE_ATS } }), applyUrl: { not: null } },
       orderBy: [{ fitScore: { sort: 'desc', nulls: 'last' } }, { updatedAt: 'asc' }], take: 20,
     });
     for (const lead of candidates) {
@@ -426,7 +427,7 @@ export class AutoApplyService {
     return r.count ? { ok: true } : { ok: false, reason: 'Attempt changed concurrently' };
   }
 
-  async reportResult(ctx: Ctx, id: string, body: { status: 'SUBMITTED' | 'BLOCKED' | 'NEEDS_ATTENTION' | 'FAILED'; evidence?: Evidence; filledFields?: unknown; missingFields?: string[]; error?: string }) {
+  async reportResult(ctx: Ctx, id: string, body: { status: 'SUBMITTED' | 'BLOCKED' | 'NEEDS_ATTENTION' | 'FAILED'; evidence?: Evidence; filledFields?: unknown; missingFields?: string[]; error?: string; submitClicked?: boolean }) {
     const a = await this.attempt(ctx, id);
     if (!['RUNNING', 'SUBMIT_CLICKED'].includes(a.status)) throw new ConflictException(`Attempt already finished (${a.status})`);
     let status: ApplyAttemptStatus = body.status;
@@ -446,16 +447,18 @@ export class AutoApplyService {
       if (a.status !== 'SUBMIT_CLICKED') { status = 'NEEDS_ATTENTION'; reason = 'Submit was reported without the submit-intent check'; }
       const v = verifyEvidence(body.evidence);
       if (!v.ok) { status = 'NEEDS_ATTENTION'; reason = `${v.reason}: open the job and confirm whether it went through`; }
-    } else if (a.status === 'SUBMIT_CLICKED' && status === 'FAILED') {
+    } else if (a.status === 'SUBMIT_CLICKED' && status === 'FAILED' && body.submitClicked !== false) {
       status = 'NEEDS_ATTENTION'; reason = `Error after clicking Submit (${body.error ?? 'unknown'}): verify manually; it will not be retried`;
     }
     const { screenshotBase64: _, ...evidence } = body.evidence ?? {};
+    // the runner says Submit was never clicked (claude engine: intent is recorded before it starts): not a possible submission
+    const neverClicked = body.submitClicked === false && status !== 'SUBMITTED' && a.status === 'SUBMIT_CLICKED';
     const retry = status === 'FAILED' && a.attemptNo < MAX_APPLY_ATTEMPTS;
     const leadStatus: JobLeadStatus = status === 'SUBMITTED' ? 'SUBMITTED' : retry ? 'APPROVED' : 'NEEDS_ATTENTION';
     await this.prisma.$transaction([
       this.prisma.applyAttempt.update({
         where: { id },
-        data: { status, error: reason?.slice(0, 2000), evidence: { ...evidence, ...(screenshot && { screenshot }) } as Prisma.InputJsonValue, filledFields: body.filledFields as Prisma.InputJsonValue, missingFields: body.missingFields ?? [], finishedAt: new Date(), leaseUntil: null },
+        data: { status, ...(neverClicked && { submitClickedAt: null }), error: reason?.slice(0, 2000), evidence: { ...evidence, ...(screenshot && { screenshot }) } as Prisma.InputJsonValue, filledFields: body.filledFields as Prisma.InputJsonValue, missingFields: body.missingFields ?? [], finishedAt: new Date(), leaseUntil: null },
       }),
       this.prisma.jobLead.update({
         where: { id: a.leadId },

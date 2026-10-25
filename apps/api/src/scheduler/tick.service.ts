@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AutoApplyService } from '../autoapply/autoapply.service';
+import { ResumeJobs } from '../builder/jobs';
 import { PrismaService } from '../prisma.service';
 import { QueueService } from '../tasks/queue.service';
 import { TaskRunner } from '../tasks/runner';
@@ -15,11 +16,11 @@ export class TickService {
   private log = new Logger('Tick');
   constructor(
     private prisma: PrismaService, private tasks: TasksService, private runner: TaskRunner,
-    private queue: QueueService, private scheduler: SchedulerService, private autoApply: AutoApplyService,
+    private queue: QueueService, private scheduler: SchedulerService, private autoApply: AutoApplyService, private resumeJobs: ResumeJobs,
   ) {}
 
   async tick(workerId: string, now = new Date()) {
-    const stats = { activated: 0, retried: 0, recovered: 0, requeued: 0, reminders: 0, applyRecovered: 0, sourcesScanned: 0 };
+    const stats = { activated: 0, retried: 0, recovered: 0, requeued: 0, reminders: 0, applyRecovered: 0, sourcesScanned: 0, atsChecked: 0 };
 
     // 1. Scheduled tasks that are due → route them (LLM / agent) now, based on current availability.
     for (const t of await this.prisma.agentTask.findMany({ where: { state: 'scheduled', scheduledFor: { lte: now } }, orderBy: [{ priority: 'asc' }, { scheduledFor: 'asc' }], take: 50 })) {
@@ -52,6 +53,11 @@ export class TickService {
       if (r.count) {
         stats.recovered++;
         await this.prisma.agentTaskAttempt.updateMany({ where: { taskId: t.id, status: 'running' }, data: { status: 'failed', error: 'lease expired', finishedAt: now } });
+        if (exhausted) {
+          const failed = await this.prisma.agentTask.findUniqueOrThrow({ where: { id: t.id } });
+          const moved = await this.runner.afterLastAttempt(failed, 'worker lease expired (timed out)').catch((e) => { this.log.warn(`fallback ${t.id}: ${e.message}`); return failed; });
+          if (moved.state === 'queued') await this.queue.enqueue(moved.id, 0);
+        }
       }
     }
 
@@ -67,6 +73,8 @@ export class TickService {
     // 5. Auto Apply: crashed apply runners (never auto-retried after Submit), then due job-source scans.
     stats.applyRecovered = await this.autoApply.recoverStale(now);
     stats.sourcesScanned = await this.autoApply.discoverDue(now).catch((e) => { this.log.warn(`discovery: ${e.message}`); return 0; });
+    // 6. ATS gate: approved jobs whose CV scores below ATS_MIN get a tailored CV before the runner may apply.
+    stats.atsChecked = await this.resumeJobs.atsTick(now).catch((e) => { this.log.warn(`ATS: ${e.message}`); return 0; });
     if (Object.values(stats).some(Boolean)) this.log.log(JSON.stringify(stats));
     return stats;
   }

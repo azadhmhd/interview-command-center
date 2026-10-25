@@ -9,6 +9,7 @@
 | Web | `pnpm dev:web` | `node apps/web/server.js` (standalone) | Proxies `/api/*` to the API (same origin) |
 | PostgreSQL 17 | `pnpm infra:up` | managed or compose | Source of truth |
 | Redis 7 | `pnpm infra:up` | compose | Job transport only; loss is recoverable |
+| MinIO | `pnpm infra:up` | compose | Optional S3 storage for CVs, resume PDFs and attachments (`127.0.0.1:9010`, console `:9011`). Unset `S3_ENDPOINT` = files stay in `UPLOAD_DIR`. |
 
 ## Environment
 
@@ -18,6 +19,14 @@ All configuration is environment-based; see [`.env.example`](../.env.example) fo
 - `APP_ENCRYPTION_KEY` — 32 random bytes, base64. Encrypts stored LLM API keys. **Back it up**; losing it makes saved keys unreadable (re-enter them).
 - `APP_URL` — public URL of the web app (used in reset / invite links).
 - `COOKIE_SECURE=true` whenever served over HTTPS.
+
+Resume builder:
+
+- `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`: object storage (MinIO in compose). On start the API creates
+  the bucket and copies any files still in `UPLOAD_DIR` into it (local copies are kept).
+- `WEB_INTERNAL_URL`: where the API reaches the web app; resume PDFs are printed from its `/print/resume` page by headless
+  Chromium (`http://web:3000` in compose). Local dev: run `pnpm --filter api exec playwright install --only-shell chromium` once.
+  `PDF_ENABLED=false` turns PDF export and Publish off.
 
 ## Production deployment (single host, Docker Compose)
 
@@ -46,8 +55,8 @@ One root `Dockerfile` with two targets built from a shared install/build stage:
 | `api` | `icc-api` | `api` service (`node dist/main.js`, runs migrations first) and `worker` service (`node dist/worker.js`) |
 | `web` | `icc-web` | `web` service (Next.js standalone) |
 
-`docker compose up -d --build` starts all five services. Start order is enforced with health checks:
-postgres + redis → api → worker + web. `./agent-workspace` is bind-mounted into api and worker at `/agent-workspace`,
+`docker compose up -d --build` starts all six services. Start order is enforced with health checks:
+postgres + redis + minio → api → worker + web. The `api` image includes Playwright's headless Chromium (~350 MB) for resume PDFs. `./agent-workspace` is bind-mounted into api and worker at `/agent-workspace`,
 so exported task packages appear on the host for Claude Code / Cursor / Antigravity.
 
 ## Running the Claude Code headless adapter

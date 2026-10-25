@@ -134,8 +134,51 @@ ICC_API_URL=http://localhost:3000 ICC_RUNNER_TOKEN=<token> pnpm apply:runner
 ```
 
 Options: `APPLY_RUNNER_PROFILE` (default `jobs`), `APPLY_RUNNER_HEADLESS=true` (default visible), `APPLY_RUNNER_ONCE=true`,
-`APPLY_RUNNER_POLL_MS`. With auto-submit off it fills the form and waits up to 20 minutes for **you** to click Submit
-(your click is recorded first), then captures the confirmation.
+`APPLY_RUNNER_POLL_MS`, `APPLY_RUNNER_REVIEW_MINUTES` (default 20). With auto-submit off it fills the form and waits
+that long for **you** to click Submit (your click is recorded first), then captures the confirmation. If you don't
+submit, the attempt ends in Needs attention with a screenshot of the filled form.
+
+### Claude engine (recommended): Claude Code in your own browser
+
+`APPLY_RUNNER_ENGINE=claude` keeps the same claim → apply → evidence loop, but each job is handed to Claude Code
+(`claude -p --chrome`), which fills and submits the form in **your own Brave or Chrome** through the Claude in Chrome
+extension. Your real browser does not announce itself as automated, so forms with invisible reCAPTCHA (Ashby,
+Greenhouse) accept it; the Playwright engine is rejected there. It runs on your subscription, no API key.
+
+```bash
+# needs: Claude Code logged in, Claude in Chrome connected in Brave/Chrome (`claude --chrome` uses it)
+ICC_API_URL=http://<server>:3000 ICC_RUNNER_TOKEN=<token> APPLY_RUNNER_ENGINE=claude pnpm apply:runner
+```
+
+Same rules: only kit answers, stop at CAPTCHA/login, no guessing required fields, Submit only in auto-submit mode, and
+`SUBMITTED` only with the confirmation Claude saw (checked again by the server). The submit intent is recorded before
+Claude starts, so a crash or timeout (15 min) is never retried automatically. It needs your computer awake with the
+browser open.
+
+### On a server (Docker)
+
+The same runner ships as the `apply-runner` compose service (Dockerfile target `runner`, headless Chromium). It is off by
+default; to run it next to the API, add to `.env` and start it:
+
+```bash
+COMPOSE_PROFILES=runner
+ICC_RUNNER_TOKEN=<token from Auto Apply → Settings → Runner tokens>
+```
+
+```bash
+docker compose up -d --build apply-runner
+docker compose logs -f apply-runner
+```
+
+Headless means nobody can click Submit, so it is meant for **auto-submit** mode: in fill-only mode every attempt waits
+`APPLY_RUNNER_REVIEW_MINUTES` and then ends in Needs attention. `docker compose stop` lets the current application finish
+(up to 2 minutes).
+
+**Limit:** Ashby and the new Greenhouse boards (`job-boards.greenhouse.io`) score every submission with invisible
+reCAPTCHA Enterprise, which rejects headless browsers without showing anything (seen live: the form just stays put). So
+headless, the runner fills such a form but does **not** click Submit: the job ends in Blocked with a screenshot of the
+filled form. It does not try to hide that it is automated. For those boards run the runner with a visible browser on
+your own machine (the default), or apply yourself; the server runner only helps for forms without that check.
 
 ## Claude Code path (optional operator)
 
@@ -152,11 +195,12 @@ Nothing is ever emailed from the app.
 
 ## Testing
 
-- Unit (`src/autoapply/autoapply.spec.ts`, 25 tests): Google Jobs and Jooble normalisation, site filter and
+- Unit (`src/autoapply/autoapply.spec.ts`, 27 tests): off-target titles and title languages you don't use (cases from real results), Google Jobs and Jooble normalisation, site filter and
   best-link choice, salary/date parsing, query building, Indeed links, normalisation for all five boards, alert parsing, URL
   canonicalisation, dedupe, scoring, blockers, false technology matches, CV selection, kit rules, transitions, evidence.
-- API e2e (`test/autoapply.e2e-spec.ts`, 10 tests, fake board + SerpApi server):
+- API e2e (`test/autoapply.e2e-spec.ts`, 11 tests, fake board + SerpApi server):
   - role search: key encrypted and never returned, site filter, company page preferred, monthly budget
+  - a search slower than the web proxy's timeout answers "running" and finishes in the background
   - discovery, dedupe and source failures
   - scan overlap
   - approval enforcement and single claim
@@ -166,7 +210,8 @@ Nothing is ever emailed from the app.
   - alert import, manual submission, tracker hand-off, recruiters, CSV
   - Claude-skill routing and validation
   - user isolation and runner tokens
-- Runner (`apps/apply-runner/tests`, 8 Playwright tests against local mock ATS pages):
+- Runner (`apps/apply-runner/tests`, 9 Playwright tests against local mock ATS pages, including an Ashby-style
+  client-rendered page without a `<form>`):
   - intent before submit, evidence capture
   - refused intent, CAPTCHA and login stops
   - unknown required question, missing CV
@@ -174,16 +219,31 @@ Nothing is ever emailed from the app.
   - user-submitted prefill
   - profile isolation and locking
 
-No test ever contacts a real job site or submits a real application.
+No automated test contacts a real job site or submits a real application.
+
+### Live check (2026-10-20)
+
+Run manually on the Docker stack with a throwaway account and fake candidate data, auto-submit off:
+
+| Step | Result |
+|---|---|
+| Google Jobs via SerpApi (real key, UAE) | 6 searches → 60 jobs, 47 new leads in 31 s |
+| Boards: Ziina (Ashby), Careem (Greenhouse), OpenAI (Ashby) | 15 + 12 + 808 jobs in 6 s, scored and ranked |
+| Runner on the real Ziina application form (`jobs.ashbyhq.com`) | Name, email, CV and phone filled, nothing missing; waited for review; **not submitted**; screenshot stored |
+
+Fixed along the way: searches longer than the 30 s web proxy timeout, Ashby's client-rendered form without `<form>`,
+a `tsx` build helper that broke fill-only mode on real pages, aggregator sites counted as company pages, and scores for
+off-target titles and other-language roles (e.g. Java roles at 94 for a Python profile).
 
 ## Limitations
 
-- **Real form submission is unverified.** The runner's form handling is verified on mock Greenhouse-style pages
-  only, because verifying it on real sites means sending real applications. Expect real forms to differ: custom
+- **Real submission is unverified.** Filling is verified on a real Ashby form (fill-only, see the live check);
+  clicking Submit and reading the confirmation is verified on mock pages only, because doing it on a real site sends a
+  real application. Expect real forms to differ: custom
   widgets, multi-step Workday-style flows, reCAPTCHA on submit. Those end up in Needs attention rather than being guessed.
 - **LinkedIn Easy Apply and other board logins are not automated.**
 - **No inbox access.** Alert emails are pasted, and recruiter replies are not detected automatically.
-- **Search providers** have not been run with real keys yet; SerpApi's coverage depends on what Google indexes for
+- **Jooble** has not been run with a real key. SerpApi's coverage depends on what Google indexes for
   your country, and Jooble returns short snippets (the full description is read when you open or fetch the job).
 - **Workable** adapter: endpoint verified, listings mapping untested against a live account with open roles.
 - **Cover notes and open-ended answers** are template- or AI-drafted from your profile; tailored CV generation is

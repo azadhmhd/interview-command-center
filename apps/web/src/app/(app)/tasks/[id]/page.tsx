@@ -30,6 +30,8 @@ export default function TaskPage() {
   const [issues, setIssues] = useState<string[]>([]);
   if (isLoading) return <Loading />;
   if (error || !t) return <ErrorBox error={error ?? new Error('Not found')} />;
+  /** applying needs a real browser: only a coding agent session can run it, so auto-route / LLM retries cannot help */
+  const browserOnly = t.type === 'job_application';
   const act = async (key: string, path: string, body?: unknown, ok?: string) => {
     setIssues([]);
     const r = await run(key, () => api(path, { method: 'POST', body }), ok);
@@ -57,8 +59,8 @@ export default function TaskPage() {
         {t.routingReason && <p className="mt-1 text-xs text-muted">Routing: {t.routingReason}</p>}
         {t.lastError && <p className="mt-1 text-xs text-danger">Last error: {t.lastError}</p>}
         <div className="mt-3 flex flex-wrap gap-2">
-          {['failed', 'retry_wait', 'ready_for_agent', 'submitted', 'awaiting_review'].includes(t.state) && <Button variant="outline" loading={busy === 'retry'} onClick={() => act('retry', `/tasks/${id}/retry`, {}, 'Re-routed')}><RefreshCw className="h-3.5 w-3.5" />Retry (auto-route)</Button>}
-          {['failed', 'retry_wait', 'ready_for_agent', 'submitted'].includes(t.state) && <Button variant="outline" loading={busy === 'llm'} onClick={() => act('llm', `/tasks/${id}/retry`, { method: 'llm' }, 'Queued for the LLM endpoint')}>Run with LLM endpoint</Button>}
+          {['failed', 'retry_wait', 'ready_for_agent', 'submitted', 'awaiting_review'].includes(t.state) && !(browserOnly && t.state === 'ready_for_agent') && <Button variant="outline" loading={busy === 'retry'} onClick={() => act('retry', `/tasks/${id}/retry`, {}, 'Re-routed')}><RefreshCw className="h-3.5 w-3.5" />Retry (auto-route)</Button>}
+          {['failed', 'retry_wait', 'ready_for_agent', 'submitted'].includes(t.state) && !browserOnly && <Button variant="outline" loading={busy === 'llm'} onClick={() => act('llm', `/tasks/${id}/retry`, { method: 'llm' }, 'Queued for the LLM endpoint')}>Run with LLM endpoint</Button>}
           {t.state === 'awaiting_review' && <><Button loading={busy === 'approve'} onClick={() => act('approve', `/tasks/${id}/approve`, undefined, 'Approved')}><Check className="h-3.5 w-3.5" />Approve result</Button><Button variant="outline" onClick={() => act('reject', `/tasks/${id}/reject`, { reason: 'Rejected in review' }, 'Sent back to the agent')}><X className="h-3.5 w-3.5" />Reject</Button></>}
           {!['completed', 'cancelled'].includes(t.state) && <Button variant="ghost" className="text-danger" onClick={() => act('cancel', `/tasks/${id}/cancel`, undefined, 'Cancelled')}>Cancel task</Button>}
         </div>

@@ -1,0 +1,83 @@
+{
+  "$id": "icc/resume_tailoring",
+  "title": "resume_tailoring",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "summary": {
+      "description": "the summary paragraph reworded for this job; omit to keep it",
+      "type": "string",
+      "maxLength": 8000
+    },
+    "entries": {
+      "default": [],
+      "description": "experience/project entries worth changing: their bullets reordered (most relevant first) and reworded with the job's vocabulary",
+      "maxItems": 60,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "bullets": {
+            "maxItems": 40,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1000
+            }
+          }
+        },
+        "required": [
+          "id",
+          "bullets"
+        ]
+      }
+    },
+    "skillGroups": {
+      "default": [],
+      "description": "skill groups with the SAME items, most relevant to the job first",
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "items": {
+            "maxItems": 80,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 120
+            }
+          }
+        },
+        "required": [
+          "id",
+          "items"
+        ]
+      }
+    },
+    "sectionOrder": {
+      "default": [],
+      "description": "all section ids in the best order for this job; empty = keep",
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 40
+      }
+    },
+    "notes": {
+      "default": "",
+      "description": "short list of what you changed and why",
+      "type": "string",
+      "maxLength": 3000
+    }
+  }
+}

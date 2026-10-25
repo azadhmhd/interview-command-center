@@ -40,6 +40,8 @@ const providerSchema = z.object({
   everyHours: z.number().int().min(1).max(168).optional(),
   baseUrl: z.string().url().optional(),
 });
+/** under the web proxy's 30 s timeout (env override for tests) */
+const RUN_WAIT_MS = Number(process.env.AUTOAPPLY_RUN_WAIT_MS ?? 20_000);
 const BOARD_TYPES = ['GREENHOUSE', 'LEVER', 'ASHBY', 'SMARTRECRUITERS', 'WORKABLE'] as JobSourceType[];
 
 /** Never send provider API keys to the browser. */
@@ -62,8 +64,11 @@ const resultSchema = z.object({
   status: z.enum(['SUBMITTED', 'BLOCKED', 'NEEDS_ATTENTION', 'FAILED']), evidence: evidenceSchema.optional(),
   filledFields: z.array(z.object({ label: z.string().max(500), value: z.string().max(5000).optional(), source: z.string().max(40).optional() })).max(200).optional(),
   missingFields: z.array(z.string().max(500)).max(200).optional(), error: optStr(2000),
+  /** the claude engine records the intent before it starts; false = it never clicked Submit, so the attempt is not a possible submission */
+  submitClicked: z.boolean().optional(),
 });
-const claimSchema = z.object({ runner: z.string().min(1).max(100) });
+/** engine claude: Claude Code in the user's own browser, which can apply on any site; playwright only on the supported ATS forms */
+const claimSchema = z.object({ runner: z.string().min(1).max(100), engine: z.enum(['playwright', 'claude']).default('playwright') });
 const tokenSchema = z.object({ label: z.string().min(1).max(60).default('apply-runner') });
 
 const csv = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -179,7 +184,10 @@ export class AutoApplyController {
     const s = await this.prisma.jobSource.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
     if (!s) throw new NotFoundException();
     if (!ADAPTERS[s.type] && !isProvider(s.type)) throw new BadRequestException('This source type is import-only');
-    const r = await this.svc.runSource(s);
+    if (s.leaseUntil && s.leaseUntil > new Date()) throw new ConflictException('A scan of this source is already running');
+    // answer within the web proxy's timeout; a long search keeps running and its jobs appear as they are scored
+    const r = await Promise.race([this.svc.runSource(s), new Promise<null>((ok) => setTimeout(() => ok(null), RUN_WAIT_MS).unref())]);
+    if (!r) return { found: 0, created: 0, running: true };
     if (r.skipped) throw new ConflictException('A scan of this source is already running');
     return r;
   }
@@ -317,8 +325,8 @@ export class AutoApplyController {
 
   // ── apply runner protocol ──
   @Post('runner/claim') @HttpCode(200) @ApiZod(claimSchema)
-  claim(@CurrentCtx() ctx: Ctx, @Body(zp(claimSchema)) body: { runner: string }) {
-    return this.svc.claim(ctx, body.runner);
+  claim(@CurrentCtx() ctx: Ctx, @Body(zp(claimSchema)) body: z.infer<typeof claimSchema>) {
+    return this.svc.claim(ctx, body.runner, body.engine);
   }
 
   @Post('runner/attempts/:id/heartbeat') @HttpCode(200)

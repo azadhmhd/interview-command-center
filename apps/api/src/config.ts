@@ -22,6 +22,14 @@ export const config = {
   redisUrl: env.REDIS_URL || 'redis://localhost:6380',
   uploadDir: resolve(env.UPLOAD_DIR || './data/uploads'),
   maxUploadBytes: int(env.MAX_UPLOAD_MB, 10) * 1024 * 1024,
+  /** S3-compatible object storage (MinIO locally). Empty endpoint = files stay in uploadDir. */
+  s3: {
+    endpoint: env.S3_ENDPOINT || '',
+    bucket: env.S3_BUCKET || 'icc',
+    region: env.S3_REGION || 'us-east-1',
+    accessKey: env.S3_ACCESS_KEY || '',
+    secretKey: env.S3_SECRET_KEY || '',
+  },
   agentWorkspaceDir: resolve(env.AGENT_WORKSPACE_DIR || '../../agent-workspace/tasks'),
   smtpUrl: env.SMTP_URL || '',
   mailFrom: env.MAIL_FROM || 'icc@localhost',
@@ -41,6 +49,12 @@ export const config = {
     enabled: bool(env.AGENT_CLAUDE_CLI_ENABLED, false),
     path: env.AGENT_CLAUDE_CLI_PATH || 'claude',
     timeoutMs: int(env.AGENT_CLAUDE_CLI_TIMEOUT_MS, 900000),
+  },
+  /** Resume PDFs: a headless Chromium prints the web app's /print/resume page. */
+  pdf: {
+    enabled: bool(env.PDF_ENABLED, true),
+    webUrl: env.WEB_INTERNAL_URL || 'http://localhost:3000',
+    timeoutMs: int(env.PDF_TIMEOUT_MS, 30000),
   },
   schedulerTickMs: int(env.SCHEDULER_TICK_MS, 30000),
   workerConcurrency: int(env.WORKER_CONCURRENCY, 2),

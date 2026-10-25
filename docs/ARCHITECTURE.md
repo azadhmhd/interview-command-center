@@ -42,6 +42,8 @@ Modular monolith, three processes, one codebase per tier.
 | `AnswerAttempt` covers practice + mock attempts; `AnswerEvaluation` 1:1 per attempt | Avoids parallel PracticeAttempt table. |
 | Reminders model prep milestones; `AgentTask` models any AI/agent work | Deterministic scheduling never touches the LLM path. |
 | Deterministic baseline course (round-type topic catalog + user history + time-boxed schedule) created instantly; AI enriches it | The core feature still works with `LLM_ENABLED=false`. |
+| Files behind `common/storage.ts` (MinIO/S3 or local disk), keys `workspaceId/file` | Same `storagePath` values in both modes, so switching needs no data migration. |
+| Resume PDFs = the web preview printed by headless Chromium | One renderer for preview and PDF, so they cannot drift apart. |
 | One OpenAI-compatible client (`openai` SDK, `baseURL`) | No provider-specific business logic. JSON mode is detected, not assumed. |
 | Claude Code headless adapter (`claude -p`) is opt-in and off by default | It is a documented CLI mode; it runs on the host only, inside the task's sandbox dir. Everything else is manual handoff. |
 | No code execution | Coding answers are reviewed (AI or rubric), never executed. A sandbox container is the upgrade path. |
@@ -84,6 +86,7 @@ available the task waits in `ready_for_agent` with instructions to resume.
 ```
 apps/api/prisma         schema, migrations, seed
 apps/api/src/common     guards, crypto, decorators, audit
+apps/api/src/builder    resume builder: drafts, content/design schemas, PDF heading-icon import, Playwright PDF
 apps/api/src/<module>   auth, workspaces, profile, resumes, applications, rounds, questions,
                         knowledge, llm, courses, practice, tasks, scheduler, agents, dashboard, account
 apps/api/test           e2e acceptance tests (real Postgres) + fake OpenAI-compatible server

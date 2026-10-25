@@ -1,7 +1,32 @@
 'use client';
 import Link from 'next/link';
+import { useState } from 'react';
+import { api, refresh } from '@/lib/api';
 import { STATUS, LeadStatus, scoreTone } from '@/lib/autoapply';
-import { Badge } from './ui';
+import { Badge, useToast } from './ui';
+
+/** Scan / search a source now and report the outcome. Long searches finish in the background. */
+export function useScan() {
+  const toast = useToast();
+  const [scanning, setScanning] = useState<string | null>(null);
+  const scan = async (id: string, quiet = false) => {
+    setScanning(id);
+    try {
+      const r = await api<{ found: number; created: number; error?: string; running?: boolean }>(`/autoapply/sources/${id}/run`, { method: 'POST' });
+      if (r.running) {
+        if (!quiet) toast('Still searching in the background. New jobs will appear here as they are scored.');
+        for (const ms of [20_000, 45_000, 90_000]) setTimeout(() => refresh('/autoapply'), ms);
+      } else if (r.error) toast(r.error, 'danger');
+      else if (!quiet) toast(`${r.found} jobs found, ${r.created} new`);
+    } catch (e) {
+      toast((e as Error).message, 'danger');
+    } finally {
+      setScanning(null);
+      refresh('/autoapply');
+    }
+  };
+  return { scanning, scan };
+}
 
 export function LeadStatusBadge({ status }: { status: LeadStatus }) {
   const s = STATUS[status] ?? { label: status, tone: 'neutral' as const };

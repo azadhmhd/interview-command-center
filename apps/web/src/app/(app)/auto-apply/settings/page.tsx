@@ -1,7 +1,7 @@
 'use client';
 import { Globe, KeyRound, Plus, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { AutoApplyNav } from '@/components/auto-apply-bits';
+import { AutoApplyNav, useScan } from '@/components/auto-apply-bits';
 import { Badge, Button, Card, CardHeader, ErrorBox, Field, Input, Loading, PageHeader, Select, Textarea, useAction } from '@/components/ui';
 import { api, refresh, useApi } from '@/lib/api';
 import { fmtDate, relTime } from '@/lib/utils';
@@ -9,7 +9,7 @@ import { fmtDate, relTime } from '@/lib/utils';
 interface Prefs { titles: string[]; locations: string[]; keywords: string[]; excludeKeywords: string[]; languages: string[]; minSalary?: number; salaryCurrency?: string; salaryPeriod?: 'year' | 'month'; remoteOk: boolean; maxAgeDays: number; searchLocations: string[]; searchCountry: string; sites: string[]; maxSearchQueries: number }
 interface Standing {
   fullName?: string; email?: string; phone?: string; linkedinUrl?: string; githubUrl?: string; websiteUrl?: string; currentLocation?: string; noticePeriod?: string;
-  salaryExpectation?: string; workAuthorization?: string; requiresSponsorship?: 'yes' | 'no'; willingToRelocate?: 'yes' | 'no'; demographics: 'decline' | 'ask_me';
+  salaryExpectation?: string; workAuthorization?: string; requiresSponsorship?: 'yes' | 'no'; willingToRelocate?: 'yes' | 'no'; educationLevel?: string; languages?: string; employmentStatus?: string; demographics: 'decline' | 'ask_me';
   consentToPrivacyNotices: boolean; consentToAccuracyDeclarations: boolean; custom: { match: string; answer: string }[];
 }
 interface Config { preferences: Prefs; standingAnswers: Standing; autoSubmit: boolean; minShortlistScore: number; minAutoApplyScore: number; dailyApplyCap: number; allowAiFreeText: boolean; discoveryHours: number }
@@ -24,6 +24,7 @@ const PROVIDER_HELP: Record<string, React.ReactNode> = {
 
 function ProviderRow({ p }: { p: Provider }) {
   const { busy, run } = useAction();
+  const { scanning, scan } = useScan();
   const [key, setKey] = useState('');
   const [budget, setBudget] = useState(String(p.monthlyBudget));
   const [hours, setHours] = useState(String(p.everyHours));
@@ -33,7 +34,7 @@ function ProviderRow({ p }: { p: Provider }) {
       <div className="flex flex-wrap items-center gap-2">
         <p className="flex-1 text-sm font-medium">{p.label} {p.hasKey ? <Badge tone="success">key …{p.apiKeyLast4}</Badge> : <Badge>no key</Badge>} {p.hasKey && !p.enabled && <Badge>paused</Badge>}</p>
         {p.hasKey && <Button size="sm" variant="ghost" onClick={() => save({ enabled: !p.enabled })}>{p.enabled ? 'Pause' : 'Resume'}</Button>}
-        {p.id && p.hasKey && <Button size="sm" variant="outline" loading={busy === 'run'} onClick={async () => { const r = await run('run', () => api<{ found: number; created: number; error?: string }>(`/autoapply/sources/${p.id}/run`, { method: 'POST' })); if (r) refresh('/autoapply'); }}>Search now</Button>}
+        {p.id && p.hasKey && <Button size="sm" variant="outline" loading={scanning === p.id} onClick={() => scan(p.id!)}>Search now</Button>}
       </div>
       <p className="text-xs text-muted">{PROVIDER_HELP[p.type]}</p>
       <div className="grid gap-2 sm:grid-cols-[1fr_140px_140px_auto] sm:items-end">
@@ -163,6 +164,9 @@ export default function AutoApplySettings() {
           <Field label="Salary expectation (exact wording)"><Input value={s.salaryExpectation ?? ''} onChange={setStanding('salaryExpectation')} placeholder="AED 20,000 per month" /></Field>
           <Field label="Work authorisation answer"><Input value={s.workAuthorization ?? ''} onChange={setStanding('workAuthorization')} placeholder="Yes" /></Field>
           <Field label="Need visa sponsorship?"><Select value={s.requiresSponsorship ?? ''} onChange={setStanding('requiresSponsorship')}><option value="">Ask me per job</option><option value="no">No</option><option value="yes">Yes</option></Select></Field>
+          <Field label="Highest education" hint="Empty: taken from your CV"><Input value={s.educationLevel ?? ''} onChange={setStanding('educationLevel')} placeholder="Bachelor's degree" /></Field>
+          <Field label="Languages you speak"><Input value={s.languages ?? ''} onChange={setStanding('languages')} placeholder="English, Arabic" /></Field>
+          <Field label="Current employment status" hint="Empty: taken from your CV"><Input value={s.employmentStatus ?? ''} onChange={setStanding('employmentStatus')} placeholder="Employed" /></Field>
           <Field label="Willing to relocate?"><Select value={s.willingToRelocate ?? ''} onChange={setStanding('willingToRelocate')}><option value="">Ask me per job</option><option value="yes">Yes</option><option value="no">No</option></Select></Field>
         </div>
         <div className="space-y-2 border-t border-border p-4 text-sm">

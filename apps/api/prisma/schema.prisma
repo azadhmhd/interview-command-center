@@ -83,9 +83,11 @@ model Workspace {
   contacts        Contact[]
   jobSources      JobSource[]
   jobLeads        JobLead[]
+  codingSubmissions CodingSubmission[]
   applyAttempts   ApplyAttempt[]
   recruiters      RecruiterContact[]
   autoApplyConfig AutoApplyConfig?
+  resumeDrafts    ResumeDraft[]
 }
 
 model WorkspaceMembership {
@@ -202,8 +204,35 @@ model ResumeDocument {
   createdAt        DateTime      @default(now())
   applications     Application[]
   jobLeads         JobLead[]
+  drafts           ResumeDraft[]
 
   @@unique([workspaceId, label, version])
+}
+
+/// Editable resume from the builder. content = sections, design = theme settings (a template is a design preset).
+/// A draft with applicationId/jobLeadId is a copy tailored to that job; Publish renders it to a PDF ResumeDocument.
+model ResumeDraft {
+  id                String          @id @default(cuid())
+  workspaceId       String
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  title             String
+  content           Json
+  design            Json
+  applicationId     String?
+  application       Application?    @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  jobLeadId         String?
+  jobLead           JobLead?        @relation(fields: [jobLeadId], references: [id], onDelete: SetNull)
+  /// the draft this one was copied from
+  sourceDraftId     String?
+  publishedResumeId String?
+  publishedResume   ResumeDocument? @relation(fields: [publishedResumeId], references: [id], onDelete: SetNull)
+  publishedAt       DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([workspaceId, updatedAt])
+  @@index([applicationId])
+  @@index([jobLeadId])
 }
 
 // ───────────────────────── Applications ─────────────────────────
@@ -248,15 +277,16 @@ model Application {
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
-  activities  ApplicationActivity[]
-  contacts    Contact[]
-  rounds      InterviewRound[]
-  occurrences InterviewQuestionOccurrence[]
-  courses     PreparationCourse[]
-  reminders   Reminder[]
-  attachments Attachment[]
-  research    ResearchSource[]
-  tasks       AgentTask[]
+  activities   ApplicationActivity[]
+  contacts     Contact[]
+  rounds       InterviewRound[]
+  occurrences  InterviewQuestionOccurrence[]
+  courses      PreparationCourse[]
+  reminders    Reminder[]
+  attachments  Attachment[]
+  research     ResearchSource[]
+  tasks        AgentTask[]
+  resumeDrafts ResumeDraft[]
 
   @@index([workspaceId, status])
   @@index([workspaceId, dedupeKey])
@@ -789,6 +819,11 @@ model JobLead {
   applyKit             Json?
   /// none | complete | incomplete
   kitStatus            String             @default("none")
+  /// ATS keyword match (0–100) of the CV attached to this job, and the job keywords the CV lacks
+  atsScore             Int?
+  atsMissing           String[]           @default([])
+  /// none → tailoring (a tailored CV is being made because atsScore < ATS_MIN) → ready (the runner may apply)
+  atsStage             String             @default("none")
   autoApproved         Boolean            @default(false)
   discoveredVia        String[]
   discoveredAt         DateTime           @default(now())
@@ -799,6 +834,7 @@ model JobLead {
   updatedAt            DateTime           @updatedAt
   attempts             ApplyAttempt[]
   recruiters           RecruiterContact[]
+  resumeDrafts         ResumeDraft[]
 
   @@unique([workspaceId, dedupeKey])
   @@index([workspaceId, status])
@@ -884,4 +920,28 @@ model AutoApplyConfig {
   allowAiFreeText   Boolean   @default(true)
   discoveryHours    Int       @default(12)
   updatedAt         DateTime  @updatedAt
+}
+
+/// A coding-practice run: the code, its in-browser test results and (optionally) an AI review of it.
+model CodingSubmission {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String?
+  problemSlug String
+  language    String
+  stage       Int
+  code        String
+  notes       String?
+  passed      Int
+  total       Int
+  /// [{ name, passed, got?, expected?, error? }] from the browser runner
+  results     Json
+  taskId      String?
+  /// code_review output, once the review task completes
+  review      Json?
+  reviewedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([workspaceId, problemSlug, createdAt])
 }
