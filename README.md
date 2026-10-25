@@ -73,8 +73,18 @@ every interview into better preparation for the next one:
 
 ## Screenshots
 
-| Interview journal | Preparation course |
+All screenshots use the seeded demo account with fictional data.
+
+| Mission control | Discover jobs (bulk approve) |
 |---|---|
+| <img src="docs/images/mission-control.png" alt="Mission control"> | <img src="docs/images/auto-apply-discover.png" alt="Discover jobs"> |
+| **Job detail: fit score, ATS check, apply kit** | **Auto Apply settings** |
+| <img src="docs/images/auto-apply-job.png" alt="Job detail"> | <img src="docs/images/auto-apply-settings.png" alt="Auto Apply settings"> |
+| **Where to search: Google Jobs and Jooble** | **Resume builder** |
+| <img src="docs/images/auto-apply-sources.png" alt="Search providers"> | <img src="docs/images/resume-builder.png" alt="Resume builder"> |
+| **Coding practice** | **Coding sandbox** |
+| <img src="docs/images/coding-practice.png" alt="Coding practice"> | <img src="docs/images/coding-sandbox.png" alt="Coding sandbox"> |
+| **Interview journal** | **Preparation course** |
 | <img src="docs/images/interview-journal.png" alt="Interview journal"> | <img src="docs/images/course.png" alt="Preparation course"> |
 | **Lesson with practice** | **Applications (Kanban)** |
 | <img src="docs/images/lesson.png" alt="Lesson"> | <img src="docs/images/applications-kanban.png" alt="Kanban"> |
@@ -115,8 +125,11 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 docker compose up -d --build
 ```
 
-Open **http://localhost:3000** and create an account. This starts PostgreSQL, Redis, API, worker and web, each
-waiting for its dependencies to be healthy. Migrations run automatically.
+Open **http://localhost:3000** and create an account. This starts PostgreSQL, Redis, MinIO (file storage), API, worker
+and web, each waiting for its dependencies to be healthy. Migrations run automatically.
+
+Running it on a home server or VM? Put the server's address in `.env` (`APP_URL=http://<server>:3000`) and keep
+`COOKIE_SECURE=false` unless you serve it over HTTPS. Backups: [docs/BACKUP.md](docs/BACKUP.md).
 
 ### Local development
 
@@ -146,7 +159,18 @@ automatically ([how routing works](docs/AGENTS.md#task-states)):
 |---|---|
 | Nothing configured | Tasks wait in the **Agent task queue** for you to run them with a coding agent (Option 2/3), or you self-assess. |
 | An LLM endpoint (Option 1) | Tasks run on it automatically. Research tasks still go to an agent because they need web access. |
-| Claude Code automatic mode (Option 2B/2C) | Tasks the LLM can't take run through Claude Code automatically. |
+| Claude Code automatic mode (Option 2B/2C) | Tasks the LLM can't take run through Claude Code automatically. If the LLM fails or times out on a task, it is retried on Claude Code. |
+| Claude in Chrome (Option 4) | The Auto Apply runner fills and submits job forms in your own browser. |
+
+Which AI does what:
+
+| Feature | Runs on |
+|---|---|
+| Courses, lessons, evaluation, CV facts, job match | LLM endpoint, else Claude Code |
+| Company research | Claude Code (needs web search) |
+| Resume tailoring and ATS-driven CV copies | LLM endpoint or Claude Code (route it under *Workspace & members → Task routing policy*) |
+| Coding practice review | LLM endpoint or Claude Code |
+| Filling and submitting job applications | Auto Apply runner: Claude in Chrome (recommended) or a Playwright browser |
 
 Results are applied and tasks complete automatically. To approve each result first, turn on
 *Workspace & members → "Ask me to approve AI and agent results"*.
@@ -226,6 +250,159 @@ and none of the app's secrets. Only the worker container receives the token; kee
 Antigravity and other agents work the same way through `agent-workspace/AGENTS.md`. Cursor and Antigravity have no
 automatic mode yet; see [docs/KNOWN_LIMITATIONS.md](docs/KNOWN_LIMITATIONS.md).
 
+### Option 4: Claude in Chrome (applying to jobs in your own browser)
+
+Job forms on Ashby and the newer Greenhouse boards silently reject automated browsers. Claude in Chrome drives your
+real, signed-in Chrome or Brave instead, so those forms accept the application.
+
+1. Install the [Claude in Chrome](https://claude.com/chrome) extension in Chrome or Brave and sign in with the same
+   Claude account as Claude Code.
+2. Check that Claude Code can see it: run `claude --chrome` and ask *"list my connected browsers"*. Note the
+   `deviceId` of the browser (profile) you want applications to go through.
+3. Use it from the Auto Apply runner ([step 7 below](#7-start-the-apply-runner)).
+
+## Auto Apply setup
+
+Auto Apply finds jobs for your target roles, scores each one with reasons, prepares an apply kit from answers you
+saved, checks your CV's ATS match and applies. Set it up once, in this order. Full reference:
+[docs/AUTO_APPLY.md](docs/AUTO_APPLY.md).
+
+### 1. Profile and CV
+
+- **Profile & CVs:** upload your CV. Extracted facts stay "AI-inferred" until you confirm them.
+- **Resume builder:** create your main resume (or import the uploaded CV) and click **Publish**. The published PDF is
+  the CV the apply kit attaches, and the ATS check tailors copies of it.
+
+### 2. What to look for
+
+*Auto Apply settings → What to look for* (or **Load a preset…** and edit it):
+
+- **Target titles**, **Locations** ("United Arab Emirates" or "UAE" also matches every emirate: Dubai, Abu Dhabi,
+  Sharjah, Ajman…), **Skills / keywords**, **Exclude jobs containing**, languages, minimum salary, maximum age, and
+  whether remote roles are fine.
+- Changing these re-scores every job you haven't acted on yet.
+
+### 3. Where to search (no company names or URLs needed)
+
+*Auto Apply settings → Where to search:*
+
+- **Search in:** the cities to search, plus a **Country code** (`ae`, `sa`, `gb`, `us`, …). One search runs per title
+  per place, capped by **Max searches per run**.
+- **Apply through these sites:** LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf, company career pages, other boards.
+  For each job the best allowed link wins: a supported company form first, then the careers page, then job boards.
+- **Search providers:** paste a key and click **Save**. Keys are encrypted with `APP_ENCRYPTION_KEY` and never shown again.
+
+| Provider | Covers | Key |
+|---|---|---|
+| Google Jobs (SerpApi) | Google's job index: LinkedIn, Indeed, Bayt, GulfTalent, Naukrigulf, Glassdoor and company pages | Free plan with 250 searches a month at [serpapi.com](https://serpapi.com) |
+| Jooble | Jooble's own index, which includes many Indeed listings | Free key from [jooble.org/api/about](https://jooble.org/api/about) |
+
+Each provider has a monthly budget and a schedule (default every 24 h). **Search now** runs one immediately.
+
+<img src="docs/images/auto-apply-sources.png" alt="Where to search" width="800">
+
+### 4. Company boards and alert emails (optional)
+
+- **Job sources:** watch a company's Greenhouse, Lever, Ashby, SmartRecruiters or Workable board by its board name
+  (from the company's careers link). New openings arrive on every scan.
+- **Discover jobs → Paste alert email / Paste job URL:** LinkedIn and Indeed alert emails and single job links are
+  recognised too.
+
+### 5. Standing answers
+
+*Auto Apply settings → Standing answers* is the **only** source for factual and sensitive answers: name, email, phone,
+links, work authorisation, notice period, salary expectation, demographics. Leave a field blank to be asked per job.
+Nothing is ever guessed. Tick **Let AI draft open-ended answers** to allow "Why us?" style answers from your profile
+(needs an LLM endpoint or Claude Code).
+
+### 6. Automation level
+
+*Auto Apply settings → Automation level:*
+
+- **Auto-submit, no stop** off (default): you approve jobs on **Discover jobs** (one at a time, or tick several and use
+  **Approve to apply / Reject**), and the runner fills the form for you to submit.
+- **Auto-submit** on: a job is approved and submitted without asking only if its score is at or above **Auto-apply at
+  score**, it has no blockers, every required answer is verified, the form is supported, it hasn't been applied to
+  before (here or in your tracker) and you're under **Max automatic applications / 24h**.
+- In every mode the runner stops on CAPTCHA, login or OTP, never guesses a required answer, never applies twice and
+  only marks a job submitted when it saw a confirmation.
+
+**ATS check:** before an approved job is applied to, your CV is scored against the job description. Below **85/100** a
+copy of your main resume is tailored to the job (it may only reword and reorder, never invent), published, re-scored
+and attached. This needs an LLM endpoint or Claude Code automatic mode (Option 1 or 2B/2C).
+
+### 7. Start the apply runner
+
+The runner claims approved jobs from the server, applies and reports evidence back. Create a token under
+*Auto Apply settings → Runner tokens → Create runner token* (it is shown once), then pick one:
+
+**A. Claude engine on your computer (recommended):** needs Claude Code signed in and Claude in Chrome connected
+([Option 4](#option-4-claude-in-chrome-applying-to-jobs-in-your-own-browser)).
+
+```bash
+pnpm install
+ICC_API_URL=http://localhost:3000 \
+ICC_RUNNER_TOKEN=<token> \
+APPLY_RUNNER_ENGINE=claude \
+APPLY_RUNNER_BROWSER_ID=<deviceId> \
+pnpm apply:runner
+```
+
+`APPLY_RUNNER_BROWSER_ID` is only needed when more than one browser is connected. Point `ICC_API_URL` at your server if
+the app runs elsewhere. The runner also picks up jobs you send with **Apply with Claude Code**. Keep the computer
+awake and the browser open while it runs.
+
+**B. Playwright engine on your computer:** a separate, isolated Chromium profile (never your everyday browser).
+
+```bash
+pnpm install && pnpm --filter apply-runner exec playwright install chromium
+ICC_API_URL=http://localhost:3000 ICC_RUNNER_TOKEN=<token> pnpm apply:runner
+```
+
+**C. Headless on the server (Docker):** add to `.env`, then `docker compose up -d --build apply-runner`.
+
+```env
+COMPOSE_PROFILES=runner
+ICC_RUNNER_TOKEN=<token>
+```
+
+Headless is meant for auto-submit mode, and forms protected by invisible reCAPTCHA (Ashby, new Greenhouse boards) end
+in *Blocked* with a screenshot of the filled form. Use option A for those.
+
+Runner options: `APPLY_RUNNER_HEADLESS`, `APPLY_RUNNER_ONCE`, `APPLY_RUNNER_POLL_MS`, `APPLY_RUNNER_REVIEW_MINUTES`,
+`APPLY_RUNNER_PROFILE` ([details](docs/AUTO_APPLY.md#the-apply-runner-your-machine)).
+
+### 8. Watch it work
+
+- **Mission control:** a live office where each agent (scouting, scoring, CV tailoring, applying…) shows what it is
+  doing, with today's count against your daily cap and your total applications.
+- **Apply queue:** approved, applying and submitted jobs with attempts, screenshots and confirmations.
+- **Needs attention:** jobs that hit a CAPTCHA, a login or an unknown required question. Open one, fix the kit or apply
+  yourself, then **I applied: mark submitted**.
+- **Move to tracker** copies a job into your application tracker once you hear back.
+
+## Resume builder
+
+Create resumes under **Resume builder**: edit sections on the left with a live A4 preview on the right, change
+template, fonts and colours under **Customize**, and tailor to a job under **AI Tools**. **Download** exports a PDF.
+
+- **PDF export:** with Docker it works out of the box. For local development run
+  `pnpm --filter api exec playwright install --only-shell chromium` once (`PDF_ENABLED`, `WEB_INTERNAL_URL` in `.env`).
+- **File storage:** Docker Compose starts MinIO and stores CVs, generated PDFs and attachments there. Use any
+  S3-compatible bucket by setting `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY` and `S3_SECRET_KEY`; leave `S3_ENDPOINT`
+  empty to keep files in `UPLOAD_DIR`. Change the default MinIO keys before exposing the server.
+
+Details: [docs/RESUME_BUILDER.md](docs/RESUME_BUILDER.md).
+
+## Coding practice
+
+**Coding practice** has 93 original problems in 16 pattern sections (two pointers, sliding window, graphs, dynamic
+programming…), each with a lesson and a step-by-step visual. Pick Python or JavaScript, write your solution and click
+**Run tests**: the code runs in your browser (Python through Pyodide), never on the server. Passing every test marks the
+problem done. Click **Get AI review** for a review that scores correctness, approach, verification, code
+quality and communication; it runs on your LLM endpoint or Claude Code. Details:
+[docs/CODING_PRACTICE.md](docs/CODING_PRACTICE.md).
+
 ## Tech stack
 
 | Layer | Tech |
@@ -275,12 +452,12 @@ apps/
   api/              NestJS API + worker: auth, workspaces, applications, rounds, knowledge base,
                     courses, practice, LLM client, task queue, scheduler, agent adapters (Prisma schema in prisma/)
   web/              Next.js UI (src/app routes, src/components, e2e/ Playwright tests, scripts/screenshots.mjs)
-  apply-runner/     Local Auto Apply runner: fills approved applications in an isolated Playwright browser profile
+  apply-runner/     Auto Apply runner: applies to approved jobs through Claude in Chrome or an isolated Playwright browser
 skills/             Agent skill pack sources, generated JSON Schemas, templates, installer
 agent-workspace/    Folder you open in Claude Code / Cursor; task packages land in tasks/
 docs/               Documentation and screenshots
-Dockerfile          One image definition: `api` target (API + worker) and `web` target
-docker-compose.yml  PostgreSQL, Redis, API, worker, web
+Dockerfile          One image definition: `api` (API + worker), `web` and `runner` targets
+docker-compose.yml  PostgreSQL, Redis, MinIO, API, worker, web, optional apply-runner
 ```
 
 ## Contributing

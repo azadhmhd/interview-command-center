@@ -150,6 +150,10 @@ Greenhouse) accept it; the Playwright engine is rejected there. It runs on your 
 ICC_API_URL=http://<server>:3000 ICC_RUNNER_TOKEN=<token> APPLY_RUNNER_ENGINE=claude pnpm apply:runner
 ```
 
+With more than one browser connected to Claude in Chrome, set `APPLY_RUNNER_BROWSER_ID=<deviceId>` so every job goes
+through the same browser profile (find the id with `claude --chrome` → "list my connected browsers"). If that browser is
+not connected the job ends in Blocked instead of opening another one.
+
 Same rules: only kit answers, stop at CAPTCHA/login, no guessing required fields, Submit only in auto-submit mode, and
 `SUBMITTED` only with the confirmation Claude saw (checked again by the server). The submit intent is recorded before
 Claude starts, so a crash or timeout (15 min) is never retried automatically. It needs your computer awake with the
@@ -183,9 +187,9 @@ your own machine (the default), or apply yourself; the server runner only helps 
 ## Claude Code path (optional operator)
 
 **Apply with Claude Code** on a job creates a `job_application` task. It always goes to a manual agent session (it needs
-a real browser, never the headless CLI or the LLM). Export the package, run Claude Code with the **Claude in Chrome**
-extension in `agent-workspace`, and the `icc-auto-apply` skill fills the form, uploads the packaged CV and reports
-evidence. Imports are validated the same way: no confirmation, no `SUBMITTED`.
+a real browser, never the headless CLI or the LLM). A runner with the Claude engine picks these tasks up by itself
+and applies the same way. Without one, export the package, run Claude Code with the **Claude in Chrome** extension in
+`agent-workspace`, and the `icc-auto-apply` skill fills the form, uploads the packaged CV and reports evidence. Imports are validated the same way: no confirmation, no `SUBMITTED`.
 
 ## Recruiters
 
